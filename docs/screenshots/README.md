@@ -9,8 +9,7 @@ Screenshots captured February 12, 2026, demonstrating the Windwalker Native Trea
 | `01-homepage-map.png` | Main map view with 833 treaty boundaries from Native-Land.ca |
 | `02-treaty-sidebar.png` | Treaty browser sidebar showing 778 treaties from Kappler |
 | `03-treaty-detail.png` | Detail panel when a treaty is selected |
-| `04-timeline-1800.png` | Map filtered to show only treaties signed by 1800 |
-| `05-timeline-1850.png` | Map filtered to show treaties signed by 1850 |
+| `04-timeline-1779-first-treaties.png` | Timeline at 1779 showing only the first 2 treaties (Delawares, 1778) |
 | `06-filter-active.png` | Treaties filtered by "Active" status |
 | `07-search-cherokee.png` | Search results for "Cherokee" |
 | `08-treaties-page.png` | Full treaties grid page |
