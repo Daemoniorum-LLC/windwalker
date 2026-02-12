@@ -1,0 +1,33 @@
+//! Syntax test file
+
+// Public struct with evidentiality (marker AFTER type)
+☉ sigil TestStruct {
+    name: String!,           // verified string
+    value: i32~,             // reported i32
+    optional: String?,       // optional string
+}
+
+// Public enum using ᛈ rune (variants are plain identifiers)
+☉ ᛈ TestEnum {
+    VariantA,
+    VariantB,
+    VariantC,
+}
+
+// Function with return evidentiality
+☉ rite test_fn() -> bool! {
+    ≔ s = TestStruct {
+        name: "test".to_string(),
+        value: 42,
+        optional: None,
+    };
+
+    ≔ e = TestEnum·VariantA;
+
+    yea
+}
+
+☉ rite main() -> i32! {
+    println!("Syntax test passed!");
+    0
+}

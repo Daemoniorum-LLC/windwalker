@@ -1,0 +1,132 @@
+//! HTTP Middleware
+//!
+//! Request/response middleware for logging, CORS, and error handling.
+
+invoke sigil_http·{Request, Response, Middleware, Next};
+invoke std::time::Instant;
+
+// ============================================================================
+// Logging Middleware
+// ============================================================================
+
+/// Logs all requests with timing
+☉ async rite logging_middleware(req: Request, next: Next) -> Response {
+    ≔ start = Instant::now();
+    ≔ method = req.method().to_string();
+    ≔ path = req.path().to_string();
+
+    // Process request
+    ≔ response = next.run(req).await;
+
+    // Log
+    ≔ elapsed = start.elapsed();
+    ≔ status = response.status();
+
+    println!(
+        "{} {} {} - {:.2}ms",
+        method,
+        path,
+        status,
+        elapsed.as_secs_f64() * 1000.0
+    );
+
+    response
+}
+
+// ============================================================================
+// CORS Middleware
+// ============================================================================
+
+/// Creates CORS middleware with specified origins
+☉ rite cors_middleware(origins: &[String]) -> impl Middleware {
+    ≔ allowed_origins = origins.to_vec();
+
+    move |req: Request, next: Next| async move {
+        // Handle preflight
+        ⎇ req.method() == "OPTIONS" {
+            ⤺ Response::empty()
+                .status(204)
+                .header("Access-Control-Allow-Origin", get_origin(&req, &allowed_origins))
+                .header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+                .header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                .header("Access-Control-Max-Age", "86400");
+        }
+
+        // Process request
+        ≔ response = next.run(req.clone()).await;
+
+        // Add CORS headers
+        response
+            .header("Access-Control-Allow-Origin", get_origin(&req, &allowed_origins))
+            .header("Vary", "Origin")
+    }
+}
+
+rite get_origin(req: &Request, allowed: &[String]) -> String {
+    ≔ origin = req.header("Origin").unwrap_or("");
+
+    ⎇ allowed.contains(&"*".to_string()) {
+        "*".to_string()
+    } ⊸ ⎇ allowed.iter().any(|o| o == origin) {
+        origin.to_string()
+    } ⊸ {
+        allowed.first().cloned().unwrap_or_else(|| "*".to_string())
+    }
+}
+
+// ============================================================================
+// Error Middleware
+// ============================================================================
+
+/// Error handling middleware with optional detailed errors
+☉ rite error_middleware(detailed: bool) -> impl Middleware {
+    move |req: Request, next: Next| async move {
+        // Try to process request
+        ≔ result = std::panic::catch_unwind(|| {
+            // Note: This is simplified - actual panic catching in async requires AssertUnwindSafe
+            next.run(req)
+        });
+
+        ⌥ result {
+            Ok(future) => future.await,
+            Err(panic) => {
+                ≔ message = ⎇ detailed {
+                    format!("Internal server error: {:?}", panic)
+                } ⊸ {
+                    "Internal server error".to_string()
+                };
+
+                Response::json(serde_json::json!({
+                    "error": message
+                })).status(500)
+            },
+        }
+    }
+}
+
+// ============================================================================
+// Rate Limiting Middleware (placeholder)
+// ============================================================================
+
+/// Rate limiting middleware
+/// TODO: Implement with Redis or in-memory store
+☉ rite rate_limit_middleware(requests_per_minute: u32) -> impl Middleware {
+    move |req: Request, next: Next| async move {
+        // TODO: Implement rate limiting
+        next.run(req).await
+    }
+}
+
+// ============================================================================
+// Authentication Middleware (placeholder)
+// ============================================================================
+
+/// API key authentication middleware
+/// TODO: Implement if API requires authentication
+☉ rite auth_middleware() -> impl Middleware {
+    move |req: Request, next: Next| async move {
+        // For now, allow all requests
+        // TODO: Check API key if required
+        next.run(req).await
+    }
+}

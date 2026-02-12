@@ -1,0 +1,272 @@
+//! MapLibre GL JS Bindings
+//!
+//! FFI bindings to MapLibre GL JS for interactive map rendering.
+//! https://maplibre.org/maplibre-gl-js/docs/
+//!
+//! These bindings allow Qliphoth components to create and control
+//! MapLibre maps through WebAssembly.
+
+invoke qliphoth_sys·js·*;
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/// Opaque handle to a MapLibre map instance
+☉ sigil MapHandle {
+    id: u32!,
+}
+
+/// Map initialization options
+☉ sigil MapOptions {
+    container: String!,
+    style: String!,
+    center: [f64; 2]!,
+    zoom: f64!,
+    min_zoom: f64!,
+    max_zoom: f64!,
+}
+
+/// Vector tile source configuration
+☉ sigil SourceConfig {
+    source_type: SourceType!,
+    tiles: [String]!,
+    min_zoom: u8!,
+    max_zoom: u8!,
+}
+
+☉ ᛈ SourceType {
+    Vector,
+    Raster,
+    GeoJson,
+}
+
+/// Layer definition for adding to map
+☉ sigil LayerDef {
+    id: String!,
+    layer_type: String!,
+    source: String!,
+    source_layer: String!,
+    paint: JsonValue!,
+    layout: ?JsonValue,
+    filter: ?JsonValue,
+    min_zoom: ?u8,
+    max_zoom: ?u8,
+}
+
+/// Map click event data
+☉ sigil MapClickEvent {
+    lng: f64!,
+    lat: f64!,
+    features: [MapFeature]!,
+}
+
+/// Feature from a click/hover event
+☉ sigil MapFeature {
+    id: ?String,
+    source: String!,
+    source_layer: String!,
+    properties: JsonValue!,
+}
+
+// ============================================================================
+// WASM Imports - Map Lifecycle
+// ============================================================================
+
+#[wasm_bindgen(module = "/dist/maplibre-bridge.js")]
+extern "js" {
+    /// Creates a new MapLibre map instance
+    #[wasm_bindgen(js_name = "createMap")]
+    ☉ rite maplibre_create_map(options: JsValue) -> u32;
+
+    /// Destroys a map instance
+    #[wasm_bindgen(js_name = "destroyMap")]
+    ☉ rite maplibre_destroy(handle: u32);
+
+    /// Checks if map is loaded
+    #[wasm_bindgen(js_name = "isMapLoaded")]
+    ☉ rite maplibre_is_loaded(handle: u32) -> bool;
+}
+
+// ============================================================================
+// WASM Imports - Sources and Layers
+// ============================================================================
+
+#[wasm_bindgen(module = "/dist/maplibre-bridge.js")]
+extern "js" {
+    /// Adds a vector tile source
+    #[wasm_bindgen(js_name = "addSource")]
+    ☉ rite maplibre_add_source(handle: u32, id: &str, config: JsValue);
+
+    /// Removes a source
+    #[wasm_bindgen(js_name = "removeSource")]
+    ☉ rite maplibre_remove_source(handle: u32, id: &str);
+
+    /// Adds a layer
+    #[wasm_bindgen(js_name = "addLayer")]
+    ☉ rite maplibre_add_layer(handle: u32, layer_def: JsValue);
+
+    /// Removes a layer
+    #[wasm_bindgen(js_name = "removeLayer")]
+    ☉ rite maplibre_remove_layer(handle: u32, id: &str);
+
+    /// Sets layer visibility
+    #[wasm_bindgen(js_name = "setLayerVisibility")]
+    ☉ rite maplibre_set_layer_visibility(handle: u32, id: &str, visible: bool);
+
+    /// Sets layer paint property
+    #[wasm_bindgen(js_name = "setLayerPaint")]
+    ☉ rite maplibre_set_layer_paint(handle: u32, layer_id: &str, property: &str, value: JsValue);
+
+    /// Sets layer filter
+    #[wasm_bindgen(js_name = "setLayerFilter")]
+    ☉ rite maplibre_set_layer_filter(handle: u32, layer_id: &str, filter: JsValue);
+}
+
+// ============================================================================
+// WASM Imports - View Control
+// ============================================================================
+
+#[wasm_bindgen(module = "/dist/maplibre-bridge.js")]
+extern "js" {
+    /// Gets map center [lng, lat]
+    #[wasm_bindgen(js_name = "getCenter")]
+    ☉ rite maplibre_get_center(handle: u32) -> JsValue;
+
+    /// Gets map zoom level
+    #[wasm_bindgen(js_name = "getZoom")]
+    ☉ rite maplibre_get_zoom(handle: u32) -> f64;
+
+    /// Gets map bounds
+    #[wasm_bindgen(js_name = "getBounds")]
+    ☉ rite maplibre_get_bounds(handle: u32) -> JsValue;
+
+    /// Sets map center
+    #[wasm_bindgen(js_name = "setCenter")]
+    ☉ rite maplibre_set_center(handle: u32, lng: f64, lat: f64);
+
+    /// Sets map zoom
+    #[wasm_bindgen(js_name = "setZoom")]
+    ☉ rite maplibre_set_zoom(handle: u32, zoom: f64);
+
+    /// Eases to a location
+    #[wasm_bindgen(js_name = "easeTo")]
+    ☉ rite maplibre_ease_to(handle: u32, center: JsValue, zoom: f64);
+
+    /// Flies to a location with animation
+    #[wasm_bindgen(js_name = "flyTo")]
+    ☉ rite maplibre_fly_to(handle: u32, center: JsValue, zoom: f64);
+
+    /// Fits map to bounds
+    #[wasm_bindgen(js_name = "fitBounds")]
+    ☉ rite maplibre_fit_bounds(handle: u32, bounds: JsValue, padding: u32);
+
+    /// Zooms in one level
+    #[wasm_bindgen(js_name = "zoomIn")]
+    ☉ rite maplibre_zoom_in(handle: u32);
+
+    /// Zooms out one level
+    #[wasm_bindgen(js_name = "zoomOut")]
+    ☉ rite maplibre_zoom_out(handle: u32);
+}
+
+// ============================================================================
+// WASM Imports - Interactivity
+// ============================================================================
+
+#[wasm_bindgen(module = "/dist/maplibre-bridge.js")]
+extern "js" {
+    /// Sets cursor style
+    #[wasm_bindgen(js_name = "setCursor")]
+    ☉ rite maplibre_set_cursor(handle: u32, cursor: &str);
+
+    /// Sets feature state (for styling based on interaction)
+    #[wasm_bindgen(js_name = "setFeatureState")]
+    ☉ rite maplibre_set_feature_state(handle: u32, source: &str, feature_id: &str, state: JsValue);
+
+    /// Removes feature state
+    #[wasm_bindgen(js_name = "removeFeatureState")]
+    ☉ rite maplibre_remove_feature_state(handle: u32, source: &str, feature_id: &str);
+
+    /// Query features at a point
+    #[wasm_bindgen(js_name = "queryRenderedFeatures")]
+    ☉ rite maplibre_query_features(handle: u32, point: JsValue, options: JsValue) -> JsValue;
+}
+
+// ============================================================================
+// WASM Imports - Events
+// ============================================================================
+
+#[wasm_bindgen(module = "/dist/maplibre-bridge.js")]
+extern "js" {
+    /// Registers load event handler
+    #[wasm_bindgen(js_name = "onLoad")]
+    ☉ rite maplibre_on_load(handle: u32, callback: &Closure<dyn Fn()>);
+
+    /// Registers click event handler for a layer
+    #[wasm_bindgen(js_name = "onClick")]
+    ☉ rite maplibre_on_click(handle: u32, layer_id: &str, callback: &Closure<dyn Fn(JsValue)>);
+
+    /// Registers mousemove event handler for a layer
+    #[wasm_bindgen(js_name = "onMouseMove")]
+    ☉ rite maplibre_on_mousemove(handle: u32, layer_id: &str, callback: &Closure<dyn Fn(JsValue)>);
+
+    /// Registers mouseleave event handler for a layer
+    #[wasm_bindgen(js_name = "onMouseLeave")]
+    ☉ rite maplibre_on_mouseleave(handle: u32, layer_id: &str, callback: &Closure<dyn Fn(JsValue)>);
+
+    /// Registers moveend event handler
+    #[wasm_bindgen(js_name = "onMoveEnd")]
+    ☉ rite maplibre_on_moveend(handle: u32, callback: &Closure<dyn Fn(JsValue)>);
+
+    /// Registers zoomend event handler
+    #[wasm_bindgen(js_name = "onZoomEnd")]
+    ☉ rite maplibre_on_zoomend(handle: u32, callback: &Closure<dyn Fn(JsValue)>);
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Converts MapOptions to JsValue for FFI
+☉ rite map_options_to_js(options: MapOptions) -> JsValue {
+    json!({
+        "container": options.container,
+        "style": options.style,
+        "center": options.center,
+        "zoom": options.zoom,
+        "minZoom": options.min_zoom,
+        "maxZoom": options.max_zoom
+    })
+}
+
+/// Converts SourceConfig to JsValue for FFI
+☉ rite source_config_to_js(config: SourceConfig) -> JsValue {
+    ≔ type_str = ⌥ config.source_type {
+        SourceType·Vector => "vector",
+        SourceType·Raster => "raster",
+        SourceType·GeoJson => "geojson",
+    };
+
+    json!({
+        "type": type_str,
+        "tiles": config.tiles,
+        "minzoom": config.min_zoom,
+        "maxzoom": config.max_zoom
+    })
+}
+
+/// Parses click event from JsValue
+☉ rite parse_click_event(js: JsValue) -> MapClickEvent {
+    ≔ lng = js_get_f64(&js, "lngLat.lng").unwrap_or(0.0);
+    ≔ lat = js_get_f64(&js, "lngLat.lat").unwrap_or(0.0);
+    ≔ features = parse_features(js_get_array(&js, "features"));
+
+    MapClickEvent { lng, lat, features }
+}
+
+rite parse_features(arr: JsValue) -> [MapFeature] {
+    // Parse features array from JS
+    // TODO: Implement proper parsing
+    []
+}

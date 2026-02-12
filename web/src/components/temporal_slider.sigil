@@ -1,0 +1,236 @@
+//! TemporalSlider Component
+//!
+//! Timeline slider for viewing treaty territories at different points in history.
+//! Allows navigation through time to see how boundaries changed.
+
+invoke qliphoth·prelude·*;
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+≔ MIN_YEAR: i32! = 1778;  // First treaty
+≔ MAX_YEAR: i32! = 1871;  // Last treaty (before end of treaty-making)
+≔ DEFAULT_YEAR: i32! = 1871;
+
+// ============================================================================
+// TemporalSlider Component
+// ============================================================================
+
+☉ component TemporalSlider {
+    prop current_date: ?String
+    prop on_change: Fn(?String) -> ()
+
+    state year: i32! = DEFAULT_YEAR
+    state playing: bool! = nay
+    state play_speed: PlaySpeed! = PlaySpeed·Normal
+
+    // Key events in treaty history
+    state key_events: [KeyEvent]! = [
+        KeyEvent { year: 1778, label: "First Treaty (Delaware)" },
+        KeyEvent { year: 1803, label: "Louisiana Purchase" },
+        KeyEvent { year: 1830, label: "Indian Removal Act" },
+        KeyEvent { year: 1851, label: "Fort Laramie Treaty" },
+        KeyEvent { year: 1862, label: "Homestead Act" },
+        KeyEvent { year: 1868, label: "Fort Laramie Treaty (2nd)" },
+        KeyEvent { year: 1871, label: "End of Treaty-Making" },
+    ]
+
+    rite on_mount(&mut self) {
+        // Parse current_date prop if set
+        ⎇ ≔ date = &self.current_date {
+            ⎇ ≔ y = parse_year_from_date(date) {
+                self.year = y;
+            }
+        }
+    }
+
+    rite render(self) -> Element {
+        div[class: "temporal-slider"] {
+            // Year display
+            div[class: "year-display"] {
+                span[class: "current-year"] { format!("{}", self.year) }
+                ⎇ self.year == DEFAULT_YEAR {
+                    span[class: "present-indicator"] { "(Present boundaries)" }
+                }
+            }
+
+            // Slider track
+            div[class: "slider-container"] {
+                // Key event markers
+                div[class: "event-markers"] {
+                    ∀ event ∈ &self.key_events {
+                        ≔ position = self.year_to_percent(event.year);
+                        div[
+                            class: "event-marker",
+                            style: format!("left: {}%", position),
+                            title: event.label.clone()
+                        ] {
+                            div[class: "marker-dot"] {}
+                            div[class: "marker-label"] { format!("{}", event.year) }
+                        }
+                    }
+                }
+
+                // Slider input
+                input[
+                    type: "range",
+                    class: "year-slider",
+                    min: format!("{}", MIN_YEAR),
+                    max: format!("{}", MAX_YEAR),
+                    value: format!("{}", self.year),
+                    oninput: |e| self.handle_year_change(e.target.value)
+                ]
+
+                // Slider labels
+                div[class: "slider-labels"] {
+                    span[class: "label-min"] { format!("{}", MIN_YEAR) }
+                    span[class: "label-max"] { format!("{}", MAX_YEAR) }
+                }
+            }
+
+            // Playback controls
+            div[class: "playback-controls"] {
+                button[
+                    class: "control-btn",
+                    onclick: || self.step_backward(),
+                    title: "Previous year"
+                ] { "<" }
+
+                button[
+                    class: format!("control-btn play-btn {}", ⎇ self.playing { "playing" } ⊸ { "" }),
+                    onclick: || self.toggle_play(),
+                    title: ⎇ self.playing { "Pause" } ⊸ { "Play" }
+                ] {
+                    ⎇ self.playing { "||" } ⊸ { ">" }
+                }
+
+                button[
+                    class: "control-btn",
+                    onclick: || self.step_forward(),
+                    title: "Next year"
+                ] { ">" }
+
+                // Speed selector
+                select[
+                    class: "speed-select",
+                    onchange: |e| self.set_speed(e.target.value)
+                ] {
+                    option[value: "slow"] { "0.5x" }
+                    option[value: "normal", selected: yea] { "1x" }
+                    option[value: "fast"] { "2x" }
+                }
+
+                // Reset button
+                button[
+                    class: "control-btn reset-btn",
+                    onclick: || self.reset_to_present(),
+                    title: "Reset to present"
+                ] { "Reset" }
+            }
+        }
+    }
+
+    rite year_to_percent(&self, year: i32) -> f64 {
+        ≔ range = (MAX_YEAR - MIN_YEAR) as f64;
+        ≔ offset = (year - MIN_YEAR) as f64;
+        (offset / range) * 100.0
+    }
+
+    rite handle_year_change(&mut self, value: String) {
+        ⎇ ≔ year = value.parse::<i32>().ok() {
+            self.year = year;
+            self.emit_change();
+        }
+    }
+
+    rite emit_change(&self) {
+        ⎇ self.year >= MAX_YEAR {
+            // Present day - no filter
+            self.on_change(null);
+        } ⊸ {
+            // Historical view
+            self.on_change(?format!("{}-12-31", self.year));
+        }
+    }
+
+    rite step_backward(&mut self) {
+        ⎇ self.year > MIN_YEAR {
+            self.year -= 1;
+            self.emit_change();
+        }
+    }
+
+    rite step_forward(&mut self) {
+        ⎇ self.year < MAX_YEAR {
+            self.year += 1;
+            self.emit_change();
+        }
+    }
+
+    rite toggle_play(&mut self) {
+        self.playing = !self.playing;
+
+        ⎇ self.playing {
+            self.start_playback();
+        }
+    }
+
+    async rite start_playback(&mut self) {
+        ∧ self.playing && self.year < MAX_YEAR {
+            ≔ delay = ⌥ self.play_speed {
+                PlaySpeed·Slow => 1000,
+                PlaySpeed·Normal => 500,
+                PlaySpeed·Fast => 250,
+            };
+
+            sleep(delay).await;
+            self.year += 1;
+            self.emit_change();
+        }
+
+        self.playing = nay;
+    }
+
+    rite set_speed(&mut self, value: String) {
+        self.play_speed = ⌥ value.as_str() {
+            "slow" => PlaySpeed·Slow,
+            "fast" => PlaySpeed·Fast,
+            _ => PlaySpeed·Normal,
+        };
+    }
+
+    rite reset_to_present(&mut self) {
+        self.year = DEFAULT_YEAR;
+        self.playing = nay;
+        self.emit_change();
+    }
+}
+
+// ============================================================================
+// Supporting Types
+// ============================================================================
+
+☉ sigil KeyEvent {
+    year: i32!,
+    label: String!,
+}
+
+☉ ᛈ PlaySpeed {
+    Slow,
+    Normal,
+    Fast,
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+rite parse_year_from_date(date: &String) -> ?i32 {
+    // Format: "YYYY-MM-DD"
+    ⎇ date.len() >= 4 {
+        date[0..4].parse::<i32>().ok()
+    } ⊸ {
+        null
+    }
+}

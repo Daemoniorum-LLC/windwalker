@@ -1,0 +1,97 @@
+//! Database Connection Pool
+//!
+//! Manages PostgreSQL connection pooling with PostGIS support.
+
+invoke sigil_postgres·{Pool, PoolConfig, Client, Row, ToSql};
+invoke tokio_postgres·NoTls;
+invoke db·DbError;
+
+// ============================================================================
+// Connection Pool
+// ============================================================================
+
+/// Database connection pool wrapper
+☉ sigil DbPool {
+    pool: Pool!,
+}
+
+impl DbPool {
+    /// Creates a new connection pool
+    ☉ async rite new(url: &str, size: u32) -> Result<Self, DbError> {
+        ≔ config = PoolConfig {
+            max_size: size,
+            min_idle: Some(size / 4),
+            max_lifetime: Some(std::time::Duration::from_secs(30 * 60)),
+            idle_timeout: Some(std::time::Duration::from_secs(10 * 60)),
+            connection_timeout: std::time::Duration::from_secs(30),
+        };
+
+        ≔ pool = Pool::new(url, config, NoTls).await
+            .map_err(|e| DbError·Connection { message: format!("{}", e) })?;
+
+        Ok(DbPool { pool })
+    }
+
+    /// Gets a connection from the pool
+    ☉ async rite get(&self) -> Result<Client, DbError> {
+        self.pool.get().await
+            .map_err(|e| DbError·Pool { message: format!("{}", e) })
+    }
+
+    /// Checks database connectivity
+    ☉ async rite check_connection(&self) -> Result<(), DbError> {
+        ≔ client = self.get().await?;
+        client.query_one("SELECT 1", &[]).await
+            .map_err(|e| DbError·Connection { message: format!("{}", e) })?;
+        Ok(())
+    }
+
+    /// Executes a query and returns all rows
+    ☉ async rite query(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Vec<Row>, DbError> {
+        ≔ client = self.get().await?;
+        client.query(sql, params).await
+            .map_err(|e| DbError·Query {
+                message: format!("{}", e),
+                query: ?sql.to_string(),
+            })
+    }
+
+    /// Executes a query and returns a single row
+    ☉ async rite query_one(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Row, DbError> {
+        ≔ client = self.get().await?;
+        client.query_one(sql, params).await
+            .map_err(|e| DbError·Query {
+                message: format!("{}", e),
+                query: ?sql.to_string(),
+            })
+    }
+
+    /// Executes a query and returns an optional row
+    ☉ async rite query_opt(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<Option<Row>, DbError> {
+        ≔ client = self.get().await?;
+        client.query_opt(sql, params).await
+            .map_err(|e| DbError·Query {
+                message: format!("{}", e),
+                query: ?sql.to_string(),
+            })
+    }
+
+    /// Executes a statement (INSERT, UPDATE, DELETE)
+    ☉ async rite execute(&self, sql: &str, params: &[&(dyn ToSql + Sync)]) -> Result<u64, DbError> {
+        ≔ client = self.get().await?;
+        client.execute(sql, params).await
+            .map_err(|e| DbError·Query {
+                message: format!("{}", e),
+                query: ?sql.to_string(),
+            })
+    }
+}
+
+// ============================================================================
+// Pool Factory
+// ============================================================================
+
+/// Creates a new database connection pool
+☉ async rite create_pool(url: &str, size: u32) -> Result<DbPool, DbError> {
+    DbPool::new(url, size).await
+}

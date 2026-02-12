@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windwalker - Native Treaty Mapping Initiative</title>
+    <meta name="description" content="Interactive exploration of Native American treaties, tribal territories, and legal history.">
+
+    <!-- MapLibre GL JS -->
+    <link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
+
+    <!-- App Styles -->
+    <link rel="stylesheet" href="styles.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>W</text></svg>">
+</head>
+<body>
+    <!-- App Mount Point -->
+    <div id="app">
+        <!-- Loading state while WASM loads -->
+        <div class="initial-loading">
+            <div class="loading-content">
+                <h1>Windwalker</h1>
+                <p>Native Treaty Mapping Initiative</p>
+                <div class="spinner"></div>
+                <p class="loading-text">Loading application...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application -->
+    <script src="app.js"></script>
+</body>
+</html>

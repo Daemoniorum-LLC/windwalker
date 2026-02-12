@@ -1,0 +1,204 @@
+//! Common Database Queries
+//!
+//! Reusable query builders and SQL snippets.
+
+invoke sigil_postgres·Row;
+
+// ============================================================================
+// Row Extension Helpers
+// ============================================================================
+
+/// Extension trait for easier row value extraction
+☉ trait RowExt {
+    rite get_string(&self, column: &str) -> String;
+    rite get_string_opt(&self, column: &str) -> ?String;
+    rite get_i32(&self, column: &str) -> i32;
+    rite get_i32_opt(&self, column: &str) -> ?i32;
+    rite get_i64(&self, column: &str) -> i64;
+    rite get_f64(&self, column: &str) -> f64;
+    rite get_bool(&self, column: &str) -> bool;
+    rite get_json(&self, column: &str) -> serde_json::Value;
+}
+
+impl RowExt for Row {
+    rite get_string(&self, column: &str) -> String {
+        self.get::<_, String>(column)
+    }
+
+    rite get_string_opt(&self, column: &str) -> ?String {
+        self.get::<_, Option<String>>(column)
+    }
+
+    rite get_i32(&self, column: &str) -> i32 {
+        self.get::<_, i32>(column)
+    }
+
+    rite get_i32_opt(&self, column: &str) -> ?i32 {
+        self.get::<_, Option<i32>>(column)
+    }
+
+    rite get_i64(&self, column: &str) -> i64 {
+        self.get::<_, i64>(column)
+    }
+
+    rite get_f64(&self, column: &str) -> f64 {
+        self.get::<_, f64>(column)
+    }
+
+    rite get_bool(&self, column: &str) -> bool {
+        self.get::<_, bool>(column)
+    }
+
+    rite get_json(&self, column: &str) -> serde_json::Value {
+        self.get::<_, serde_json::Value>(column)
+    }
+}
+
+// ============================================================================
+// Query Builders
+// ============================================================================
+
+/// Builds a WHERE clause from optional filters
+☉ sigil WhereBuilder {
+    clauses: Vec<String>!,
+    params: Vec<Box<dyn ToSql + Send + Sync>>!,
+    param_idx: u32!,
+}
+
+impl WhereBuilder {
+    ☉ rite new() -> Self {
+        WhereBuilder {
+            clauses: vec![],
+            params: vec![],
+            param_idx: 1,
+        }
+    }
+
+    /// Adds an equality condition
+    ☉ rite eq<T: ToSql + Send + Sync + 'static>(&mut self, column: &str, value: Option<T>) -> &mut Self {
+        ⎇ ≔ v = value {
+            self.clauses.push(format!("{} = ${}", column, self.param_idx));
+            self.params.push(Box::new(v));
+            self.param_idx += 1;
+        }
+        self
+    }
+
+    /// Adds an ILIKE condition
+    ☉ rite ilike(&mut self, column: &str, pattern: Option<String>) -> &mut Self {
+        ⎇ ≔ p = pattern {
+            self.clauses.push(format!("{} ILIKE ${}", column, self.param_idx));
+            self.params.push(Box::new(format!("%{}%", p)));
+            self.param_idx += 1;
+        }
+        self
+    }
+
+    /// Adds a >= condition
+    ☉ rite gte<T: ToSql + Send + Sync + 'static>(&mut self, column: &str, value: Option<T>) -> &mut Self {
+        ⎇ ≔ v = value {
+            self.clauses.push(format!("{} >= ${}", column, self.param_idx));
+            self.params.push(Box::new(v));
+            self.param_idx += 1;
+        }
+        self
+    }
+
+    /// Adds a <= condition
+    ☉ rite lte<T: ToSql + Send + Sync + 'static>(&mut self, column: &str, value: Option<T>) -> &mut Self {
+        ⎇ ≔ v = value {
+            self.clauses.push(format!("{} <= ${}", column, self.param_idx));
+            self.params.push(Box::new(v));
+            self.param_idx += 1;
+        }
+        self
+    }
+
+    /// Adds a spatial intersection condition
+    ☉ rite intersects_bbox(&mut self, geom_column: &str, bbox: Option<(f64, f64, f64, f64)>) -> &mut Self {
+        ⎇ ≔ (min_lng, min_lat, max_lng, max_lat) = bbox {
+            self.clauses.push(format!(
+                "ST_Intersects({}, ST_MakeEnvelope(${}, ${}, ${}, ${}, 4326))",
+                geom_column,
+                self.param_idx,
+                self.param_idx + 1,
+                self.param_idx + 2,
+                self.param_idx + 3
+            ));
+            self.params.push(Box::new(min_lng));
+            self.params.push(Box::new(min_lat));
+            self.params.push(Box::new(max_lng));
+            self.params.push(Box::new(max_lat));
+            self.param_idx += 4;
+        }
+        self
+    }
+
+    /// Builds the WHERE clause string
+    ☉ rite build(&self) -> String {
+        ⎇ self.clauses.is_empty() {
+            String::new()
+        } ⊸ {
+            format!(" WHERE {}", self.clauses.join(" AND "))
+        }
+    }
+
+    /// Returns the next parameter index
+    ☉ rite next_param_idx(&self) -> u32 {
+        self.param_idx
+    }
+
+    /// Consumes and returns params
+    ☉ rite into_params(self) -> Vec<Box<dyn ToSql + Send + Sync>> {
+        self.params
+    }
+}
+
+// ============================================================================
+// Pagination
+// ============================================================================
+
+/// Pagination parameters
+☉ sigil Pagination {
+    limit: u32!,
+    offset: u32!,
+}
+
+impl Pagination {
+    ☉ rite new(limit: Option<u32>, offset: Option<u32>, max_limit: u32) -> Self {
+        Pagination {
+            limit: limit.unwrap_or(50).min(max_limit),
+            offset: offset.unwrap_or(0),
+        }
+    }
+
+    ☉ rite to_sql(&self, param_idx: u32) -> String {
+        format!(" LIMIT ${} OFFSET ${}", param_idx, param_idx + 1)
+    }
+}
+
+// ============================================================================
+// Sorting
+// ============================================================================
+
+/// Sort direction
+☉ ᛈ SortDir {
+    Asc,
+    Desc,
+}
+
+impl SortDir {
+    ☉ rite from_str(s: &str) -> Self {
+        ⌥ s.to_lowercase().as_str() {
+            "asc" => SortDir·Asc,
+            _ => SortDir·Desc,
+        }
+    }
+
+    ☉ rite to_sql(&self) -> &'static str {
+        ⌥ self {
+            SortDir·Asc => "ASC",
+            SortDir·Desc => "DESC",
+        }
+    }
+}

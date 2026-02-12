@@ -1,0 +1,334 @@
+//! MapExplorer Component
+//!
+//! Interactive map for exploring treaty territories using MapLibre GL JS.
+//!
+//! Features:
+//! - Vector tile rendering of treaty boundaries
+//! - Territory layers with temporal filtering
+//! - Click-to-select treaties and tribes
+//! - Evidentiality-based styling (verified vs uncertain boundaries)
+
+invoke qliphoth·prelude·*;
+invoke bindings·maplibre·*;
+
+// ============================================================================
+// Map Configuration
+// ============================================================================
+
+≔ DEFAULT_STYLE: &str! = "https://demotiles.maplibre.org/style.json";
+≔ TILE_URL: &str! = "/tiles/{layer}/{z}/{x}/{y}.mvt";
+
+/// Layer configuration for map rendering
+☉ sigil LayerConfig {
+    id: String!,
+    source: String!,
+    layer_type: LayerType!,
+    paint: LayerPaint!,
+    filter: ?String,
+}
+
+☉ ᛈ LayerType {
+    Fill,
+    Line,
+    Symbol,
+    Circle,
+}
+
+☉ sigil LayerPaint {
+    fill_color: ?String,
+    fill_opacity: ?f64,
+    line_color: ?String,
+    line_width: ?f64,
+    line_dasharray: ?[f64],
+}
+
+// ============================================================================
+// MapExplorer Component
+// ============================================================================
+
+☉ component MapExplorer {
+    // Props
+    prop center: [f64; 2]!
+    prop zoom: f64!
+    prop selected_treaty: ?String
+    prop on_treaty_click: Fn(String) -> ()
+    prop on_move: Fn([f64; 2], f64) -> ()
+
+    // Internal state
+    state map_handle: ?MapHandle
+    state loaded: bool! = nay
+    state hovered_feature: ?String
+
+    rite on_mount(&mut self) {
+        // Initialize MapLibre map
+        ≔ options = MapOptions {
+            container: "windwalker-map".to_string(),
+            style: DEFAULT_STYLE.to_string(),
+            center: self.center,
+            zoom: self.zoom,
+            min_zoom: 2.0,
+            max_zoom: 18.0,
+        };
+
+        ≔ handle = maplibre_create_map(options);
+        self.map_handle = ?handle;
+
+        // Add event listeners
+        maplibre_on_load(handle, || {
+            self.on_map_loaded();
+        });
+
+        maplibre_on_click(handle, "treaties-fill", |e| {
+            ⎇ ≔ feature = e.features.first() {
+                self.on_treaty_click(feature.properties.get("id").unwrap());
+            }
+        });
+
+        maplibre_on_mousemove(handle, "treaties-fill", |e| {
+            ⎇ ≔ feature = e.features.first() {
+                self.hovered_feature = ?feature.properties.get("id");
+                maplibre_set_cursor(handle, "pointer");
+            }
+        });
+
+        maplibre_on_mouseleave(handle, "treaties-fill", |_| {
+            self.hovered_feature = null;
+            maplibre_set_cursor(handle, "");
+        });
+
+        maplibre_on_moveend(handle, |_| {
+            ≔ center = maplibre_get_center(handle);
+            ≔ zoom = maplibre_get_zoom(handle);
+            self.on_move(center, zoom);
+        });
+    }
+
+    rite on_map_loaded(&mut self) {
+        ≔ handle = self.map_handle.unwrap();
+
+        // Add treaty territories source
+        maplibre_add_source(handle, "treaties", SourceConfig {
+            source_type: SourceType·Vector,
+            tiles: [format!("{}/treaties/{{z}}/{{x}}/{{y}}.mvt", "/tiles")],
+            min_zoom: 0,
+            max_zoom: 14,
+        });
+
+        // Add tribe territories source
+        maplibre_add_source(handle, "tribes", SourceConfig {
+            source_type: SourceType·Vector,
+            tiles: [format!("{}/tribes/{{z}}/{{x}}/{{y}}.mvt", "/tiles")],
+            min_zoom: 0,
+            max_zoom: 14,
+        });
+
+        // Add territory fill layer (verified boundaries)
+        maplibre_add_layer(handle, LayerDef {
+            id: "treaties-fill-verified".to_string(),
+            layer_type: "fill".to_string(),
+            source: "treaties".to_string(),
+            source_layer: "treaties".to_string(),
+            paint: json!({
+                "fill-color": [
+                    "case",
+                    ["==", ["get", "status"], "Active"], "#2d5a27",
+                    ["==", ["get", "status"], "Violated"], "#8b2323",
+                    ["==", ["get", "status"], "Abrogated"], "#555555",
+                    "#3a6ea5"
+                ],
+                "fill-opacity": [
+                    "case",
+                    ["==", ["get", "certainty"], "Verified"], 0.4,
+                    ["==", ["get", "certainty"], "Probable"], 0.3,
+                    0.2
+                ]
+            }),
+            filter: json!(["==", ["get", "certainty"], "Verified"]),
+        });
+
+        // Add territory fill layer (uncertain boundaries - dashed)
+        maplibre_add_layer(handle, LayerDef {
+            id: "treaties-fill-uncertain".to_string(),
+            layer_type: "fill".to_string(),
+            source: "treaties".to_string(),
+            source_layer: "treaties".to_string(),
+            paint: json!({
+                "fill-color": "#888888",
+                "fill-opacity": 0.15,
+                "fill-pattern": "diagonal-hatch"
+            }),
+            filter: json!(["in", ["get", "certainty"], ["literal", ["Uncertain", "Disputed", "Reconstructed"]]]),
+        });
+
+        // Add treaty boundary lines
+        maplibre_add_layer(handle, LayerDef {
+            id: "treaties-line".to_string(),
+            layer_type: "line".to_string(),
+            source: "treaties".to_string(),
+            source_layer: "treaties".to_string(),
+            paint: json!({
+                "line-color": [
+                    "case",
+                    ["==", ["get", "certainty"], "Verified"], "#1a3d1a",
+                    ["==", ["get", "certainty"], "Probable"], "#3a5a3a",
+                    "#888888"
+                ],
+                "line-width": [
+                    "case",
+                    ["boolean", ["feature-state", "selected"], false], 3,
+                    ["boolean", ["feature-state", "hover"], false], 2,
+                    1
+                ],
+                "line-dasharray": [
+                    "case",
+                    ["in", ["get", "certainty"], ["literal", ["Uncertain", "Disputed"]]],
+                    ["literal", [2, 2]],
+                    ["literal", [1]]
+                ]
+            }),
+        });
+
+        // Add labels for treaties
+        maplibre_add_layer(handle, LayerDef {
+            id: "treaties-labels".to_string(),
+            layer_type: "symbol".to_string(),
+            source: "treaties".to_string(),
+            source_layer: "treaties".to_string(),
+            layout: json!({
+                "text-field": ["get", "name"],
+                "text-size": 12,
+                "text-anchor": "center",
+                "text-max-width": 10
+            }),
+            paint: json!({
+                "text-color": "#333333",
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 1
+            }),
+            min_zoom: 6,
+        });
+
+        self.loaded = yea;
+    }
+
+    rite on_update(&mut self, prev_props: &Props) {
+        ⎇ self.map_handle.is_none() {
+            ⤺;
+        }
+
+        ≔ handle = self.map_handle.unwrap();
+
+        // Update selected treaty highlight
+        ⎇ prev_props.selected_treaty != self.selected_treaty {
+            // Clear previous selection
+            ⎇ ≔ prev_id = prev_props.selected_treaty {
+                maplibre_set_feature_state(handle, "treaties", prev_id, json!({
+                    "selected": false
+                }));
+            }
+            // Set new selection
+            ⎇ ≔ new_id = self.selected_treaty.clone() {
+                maplibre_set_feature_state(handle, "treaties", new_id, json!({
+                    "selected": true
+                }));
+                // Optionally fly to the treaty
+                // maplibre_fly_to_feature(handle, "treaties", new_id);
+            }
+        }
+
+        // Update center/zoom if changed externally
+        ⎇ prev_props.center != self.center || prev_props.zoom != self.zoom {
+            maplibre_ease_to(handle, self.center, self.zoom);
+        }
+    }
+
+    rite on_unmount(&mut self) {
+        ⎇ ≔ handle = self.map_handle {
+            maplibre_destroy(handle);
+        }
+    }
+
+    rite render(self) -> Element {
+        div[class: "map-explorer"] {
+            // Map container (MapLibre mounts here)
+            div[id: "windwalker-map", class: "map-canvas"] {}
+
+            // Map controls overlay
+            div[class: "map-controls"] {
+                // Zoom controls
+                div[class: "zoom-controls"] {
+                    button[
+                        class: "control-btn",
+                        onclick: || self.zoom_in(),
+                        title: "Zoom in"
+                    ] { "+" }
+                    button[
+                        class: "control-btn",
+                        onclick: || self.zoom_out(),
+                        title: "Zoom out"
+                    ] { "-" }
+                }
+
+                // Layer toggle
+                div[class: "layer-controls"] {
+                    button[
+                        class: "control-btn",
+                        onclick: || self.toggle_layer_panel(),
+                        title: "Map layers"
+                    ] { "Layers" }
+                }
+            }
+
+            // Legend
+            div[class: "map-legend"] {
+                h4 { "Treaty Status" }
+                div[class: "legend-item"] {
+                    span[class: "legend-color", style: "background: #2d5a27"] {}
+                    span { "Active" }
+                }
+                div[class: "legend-item"] {
+                    span[class: "legend-color", style: "background: #8b2323"] {}
+                    span { "Violated" }
+                }
+                div[class: "legend-item"] {
+                    span[class: "legend-color", style: "background: #555555"] {}
+                    span { "Abrogated" }
+                }
+
+                h4 { "Boundary Certainty" }
+                div[class: "legend-item"] {
+                    span[class: "legend-line solid"] {}
+                    span { "Verified" }
+                }
+                div[class: "legend-item"] {
+                    span[class: "legend-line dashed"] {}
+                    span { "Uncertain/Disputed" }
+                }
+            }
+
+            // Loading indicator
+            ⎇ !self.loaded {
+                div[class: "map-loading"] {
+                    div[class: "spinner"] {}
+                    span { "Loading map..." }
+                }
+            }
+        }
+    }
+
+    rite zoom_in(&mut self) {
+        ⎇ ≔ handle = self.map_handle {
+            maplibre_zoom_in(handle);
+        }
+    }
+
+    rite zoom_out(&mut self) {
+        ⎇ ≔ handle = self.map_handle {
+            maplibre_zoom_out(handle);
+        }
+    }
+
+    rite toggle_layer_panel(&mut self) {
+        // TODO: Implement layer visibility toggle panel
+    }
+}

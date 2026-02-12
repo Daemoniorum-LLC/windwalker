@@ -7,37 +7,37 @@
 //! 4. Stage for review
 //! 5. Promote to production
 
-invoke crate·types·*;
-invoke crate·sources·*;
-invoke crate·sources·kappler;
-invoke crate·sources·nara;
-invoke crate·normalize·*;
-invoke crate·validate·*;
+invoke types·*;
+invoke sources·*;
+invoke sources·kappler;
+invoke sources·nara;
+invoke normalize·*;
+invoke validate·*;
 
 // ============================================================================
 // Pipeline Configuration
 // ============================================================================
 
 /// Configuration for a pipeline run
-sigil PipelineConfig {
+☉ sigil PipelineConfig {
     /// Scraping configuration
-    scrape: !ScrapeConfig,
+    scrape: ScrapeConfig!,
 
     /// Which sources to scrape
-    sources: ![SourceType],
+    sources: [SourceType]!,
 
     /// Whether to cross-reference across sources
-    cross_reference: !bool,
+    cross_reference: bool!,
 
     /// Whether to automatically resolve simple conflicts
-    auto_resolve: !bool,
+    auto_resolve: bool!,
 
     /// Maximum items to process (for testing)
-    max_items: ?u64,
+    max_items: u64?,
 }
 
 /// Default pipeline configuration
-rite default_pipeline_config() → !PipelineConfig {
+☉ rite default_pipeline_config() -> PipelineConfig! {
     ⤺ PipelineConfig {
         scrape: default_scrape_config(),
         sources: [SourceType·Kappler, SourceType·NARA],
@@ -52,37 +52,37 @@ rite default_pipeline_config() → !PipelineConfig {
 // ============================================================================
 
 /// Summary of a pipeline run
-sigil PipelineResult {
+☉ sigil PipelineResult {
     /// When the pipeline started
-    started_at: !DateTime,
+    started_at: DateTime!,
 
     /// When the pipeline finished
-    finished_at: !DateTime,
+    finished_at: DateTime!,
 
     /// Number of treaties processed
-    treaties_processed: !u64,
+    treaties_processed: u64!,
 
     /// Number of treaties validated successfully
-    treaties_valid: !u64,
+    treaties_valid: u64!,
 
     /// Number of treaties with validation errors
-    treaties_invalid: !u64,
+    treaties_invalid: u64!,
 
     /// Number of items sent to review queue
-    items_queued_for_review: !u64,
+    items_queued_for_review: u64!,
 
     /// Number of conflicts detected
-    conflicts_detected: !u64,
+    conflicts_detected: u64!,
 
     /// Errors encountered during processing
-    errors: ![PipelineError],
+    errors: [PipelineError]!,
 }
 
-sigil PipelineError {
-    stage: !String,
-    message: !String,
-    source: ?String,
-    item_id: ?String,
+☉ sigil PipelineError {
+    stage: String!,
+    message: String!,
+    source: String?,
+    item_id: String?,
 }
 
 // ============================================================================
@@ -90,7 +90,7 @@ sigil PipelineError {
 // ============================================================================
 
 /// Runs the full sourcing pipeline
-async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
+☉ async rite run_pipeline(config: PipelineConfig!) -> PipelineResult! {
     ≔ started_at = DateTime·now();
     ≔ vary errors: [PipelineError] = [];
     ≔ vary treaties_processed: u64 = 0;
@@ -100,32 +100,32 @@ async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
     ≔ vary conflicts_detected: u64 = 0;
 
     // Stage 1: Fetch treaty indices from all sources
-    println("Stage 1: Fetching treaty indices...");
+    println!("Stage 1: Fetching treaty indices...");
 
     ≔ vary kappler_treaties: [RawTreaty] = [];
     ≔ vary nara_records: [RawArchiveRecord] = [];
 
     ⎇ config.sources.contains(SourceType·Kappler) {
-        print("  Fetching Kappler index... ");
+        print!("  Fetching Kappler index... ");
         ⌥ kappler·fetch_treaty_index(config.scrape.clone()).await {
             ScrapeResult·Ok { data, .. } => {
-                println("found {} entries", data.len());
+                println!("found {} entries", data.len());
 
                 // Fetch individual treaties
                 ≔ limit = config.max_items.unwrap_or(data.len() as u64) as usize;
-                ∀ (i, entry) in data.iter().take(limit).enumerate() {
-                    print("  Fetching treaty {}/{}... ", i + 1, limit);
+                ∀ (i, entry) ∈ data.iter().take(limit).enumerate() {
+                    print!("  Fetching treaty {}/{}... ", i + 1, limit);
 
                     ⌥ kappler·fetch_treaty(entry.id.clone(), config.scrape.clone()).await {
                         ScrapeResult·Ok { data: treaty, .. } => {
-                            println("OK");
+                            println!("OK");
                             kappler_treaties.push(treaty);
                         },
                         ScrapeResult·NotFound => {
-                            println("not found");
+                            println!("not found");
                         },
                         ScrapeResult·NetworkError { message } => {
-                            println("error: {}", message);
+                            println!("error: {}", message);
                             errors.push(PipelineError {
                                 stage: "fetch".to_string(),
                                 message: message,
@@ -134,7 +134,7 @@ async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
                             });
                         },
                         ScrapeResult·ParseError { message, .. } => {
-                            println("parse error: {}", message);
+                            println!("parse error: {}", message);
                             errors.push(PipelineError {
                                 stage: "fetch".to_string(),
                                 message: message,
@@ -143,14 +143,14 @@ async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
                             });
                         },
                         ScrapeResult·RateLimited { retry_after_ms } => {
-                            println("rate limited, waiting {}ms", retry_after_ms);
+                            println!("rate limited, waiting {}ms", retry_after_ms);
                             sleep(retry_after_ms).await;
                         },
                     }
                 }
             },
             ScrapeResult·NetworkError { message } => {
-                println("error: {}", message);
+                println!("error: {}", message);
                 errors.push(PipelineError {
                     stage: "index".to_string(),
                     message: message,
@@ -159,20 +159,20 @@ async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
                 });
             },
             _ => {
-                println("failed");
+                println!("failed");
             },
         }
     }
 
     ⎇ config.sources.contains(SourceType·NARA) {
-        print("  Fetching NARA records... ");
+        print!("  Fetching NARA records... ");
         ⌥ nara·search_treaties("indian treaty".to_string(), config.scrape.clone()).await {
             ScrapeResult·Ok { data, .. } => {
-                println("found {} records", data.len());
+                println!("found {} records", data.len());
                 nara_records = data;
             },
             ScrapeResult·NetworkError { message } => {
-                println("error: {}", message);
+                println!("error: {}", message);
                 errors.push(PipelineError {
                     stage: "index".to_string(),
                     message: message,
@@ -181,16 +181,16 @@ async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
                 });
             },
             _ => {
-                println("failed");
+                println!("failed");
             },
         }
     }
 
     // Stage 2: Validate all treaties
-    println("");
-    println("Stage 2: Validating {} treaties...", kappler_treaties.len());
+    println!("");
+    println!("Stage 2: Validating {} treaties...", kappler_treaties.len());
 
-    ∀ treaty in &kappler_treaties {
+    ∀ treaty ∈ &kappler_treaties {
         treaties_processed = treaties_processed + 1;
 
         ≔ validation = validate_treaty(treaty.clone());
@@ -205,30 +205,30 @@ async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
         ⎇ ≔ review_item = needs_review(treaty.clone(), validation.clone()) {
             items_queued = items_queued + 1;
             // TODO: Actually queue the item
-            println("  Queued for review: {}", treaty.title);
+            println!("  Queued for review: {}", treaty.title);
         }
     }
 
     // Stage 3: Cross-reference (if enabled)
     ⎇ config.cross_reference {
-        println("");
-        println("Stage 3: Cross-referencing...");
+        println!("");
+        println!("Stage 3: Cross-referencing...");
 
         // TODO: Match Kappler treaties to NARA records
         // This requires fuzzy matching on titles, dates, etc.
-        println("  (Cross-referencing not yet implemented)");
+        println!("  (Cross-referencing not yet implemented)");
     }
 
     // Stage 4: Summary
     ≔ finished_at = DateTime·now();
 
-    println("");
-    println("Pipeline complete!");
-    println("  Treaties processed: {}", treaties_processed);
-    println("  Valid: {}", treaties_valid);
-    println("  Invalid: {}", treaties_invalid);
-    println("  Queued for review: {}", items_queued);
-    println("  Errors: {}", errors.len());
+    println!("");
+    println!("Pipeline complete!");
+    println!("  Treaties processed: {}", treaties_processed);
+    println!("  Valid: {}", treaties_valid);
+    println!("  Invalid: {}", treaties_invalid);
+    println!("  Queued for review: {}", items_queued);
+    println!("  Errors: {}", errors.len());
 
     ⤺ PipelineResult {
         started_at,
@@ -247,20 +247,20 @@ async rite run_pipeline(config: !PipelineConfig) → !PipelineResult {
 // ============================================================================
 
 /// Saves a validated treaty to the staging database
-async rite stage_treaty(treaty: !RawTreaty) → Result<String, String> {
+☉ async rite stage_treaty(treaty: RawTreaty!) -> Result<String, String> {
     // TODO: Implement actual database storage
     // For now, just return a mock ID
     ⤺ Result·Ok(format!("staged-{}", uuid·v4()));
 }
 
 /// Saves a review item to the queue
-async rite queue_for_review(item: !ReviewItem) → Result<String, String> {
+☉ async rite queue_for_review(item: ReviewItem!) -> Result<String, String> {
     // TODO: Implement actual queue storage
     ⤺ Result·Ok(item.id);
 }
 
 /// Promotes a staged treaty to production
-async rite promote_to_production(staged_id: !String) → Result<String, String> {
+☉ async rite promote_to_production(staged_id: String!) -> Result<String, String> {
     // TODO: Implement production promotion
     ⤺ Result·Ok(format!("prod-{}", staged_id));
 }
@@ -270,15 +270,15 @@ async rite promote_to_production(staged_id: !String) → Result<String, String> 
 // ============================================================================
 
 /// Main entry point for the sourcing pipeline CLI
-☉ async rite main() → !i32 {
-    println("Windwalker Data Sourcing Pipeline");
-    println("==================================");
-    println("");
+☉ async rite main() -> i32! {
+    println!("Windwalker Data Sourcing Pipeline");
+    println!("==================================");
+    println!("");
 
     // Parse command line args
     ≔ args = env·args().collect·<[String]>();
 
-    ⎇ args.len() > 1 ∧ args[1] == "--help" {
+    ⎇ args.len() > 1 && args[1] == "--help" {
         print_usage();
         ⤺ 0;
     }
@@ -297,22 +297,22 @@ async rite promote_to_production(staged_id: !String) → Result<String, String> 
     ⎇ result.errors.is_empty() {
         ⤺ 0;
     } ⎉ {
-        eprintln("Pipeline completed with {} errors", result.errors.len());
+        eprintln!("Pipeline completed with {} errors", result.errors.len());
         ⤺ 1;
     }
 }
 
 rite print_usage() {
-    println("Usage: windwalker-sourcing [OPTIONS]");
-    println("");
-    println("Options:");
-    println("  --help           Show this help message");
-    println("  --full           Run full pipeline (all sources, no limits)");
-    println("  --kappler-only   Only scrape Kappler");
-    println("  --nara-only      Only scrape NARA");
-    println("  --limit N        Limit to N treaties");
-    println("");
-    println("Examples:");
-    println("  windwalker-sourcing --kappler-only --limit 10");
-    println("  windwalker-sourcing --full");
+    println!("Usage: windwalker-sourcing [OPTIONS]");
+    println!("");
+    println!("Options:");
+    println!("  --help           Show this help message");
+    println!("  --full           Run full pipeline (all sources, no limits)");
+    println!("  --kappler-only   Only scrape Kappler");
+    println!("  --nara-only      Only scrape NARA");
+    println!("  --limit N        Limit to N treaties");
+    println!("");
+    println!("Examples:");
+    println!("  windwalker-sourcing --kappler-only --limit 10");
+    println!("  windwalker-sourcing --full");
 }

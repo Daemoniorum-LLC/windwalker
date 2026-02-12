@@ -1,0 +1,178 @@
+//! SearchPanel Component
+//!
+//! Full-text search across treaties, tribes, and territories.
+
+invoke qliphoth·prelude·*;
+
+// ============================================================================
+// Search Types
+// ============================================================================
+
+☉ sigil SearchResult {
+    entity_type: String!,
+    id: String!,
+    title: String~,
+    snippet: ?String,
+    score: f64!,
+}
+
+☉ ᛈ SearchScope {
+    All,
+    Treaties,
+    Tribes,
+    Territories,
+    Laws,
+}
+
+// ============================================================================
+// SearchPanel Component
+// ============================================================================
+
+☉ component SearchPanel {
+    prop query: String!
+    prop on_search: Fn(String) -> ()
+
+    state results: [SearchResult]~ = []
+    state loading: bool! = nay
+    state scope: SearchScope! = SearchScope·All
+    state show_results: bool! = nay
+
+    rite render(self) -> Element {
+        div[class: "search-panel"] {
+            // Search input
+            div[class: "search-input-wrapper"] {
+                span[class: "search-icon"] { ">" }
+                input[
+                    type: "text",
+                    class: "search-input",
+                    placeholder: "Search treaties, tribes, territories...",
+                    value: self.query.clone(),
+                    oninput: |e| self.handle_input(e.target.value),
+                    onkeydown: |e| self.handle_keydown(e),
+                    onfocus: || self.show_results = yea,
+                ]
+            }
+
+            // Scope selector
+            div[class: "search-scope"] {
+                button[
+                    class: self.scope_btn_class(SearchScope·All),
+                    onclick: || self.scope = SearchScope·All
+                ] { "All" }
+                button[
+                    class: self.scope_btn_class(SearchScope·Treaties),
+                    onclick: || self.scope = SearchScope·Treaties
+                ] { "Treaties" }
+                button[
+                    class: self.scope_btn_class(SearchScope·Tribes),
+                    onclick: || self.scope = SearchScope·Tribes
+                ] { "Tribes" }
+                button[
+                    class: self.scope_btn_class(SearchScope·Territories),
+                    onclick: || self.scope = SearchScope·Territories
+                ] { "Territories" }
+            }
+
+            // Results dropdown
+            ⎇ self.show_results && !self.results.is_empty() {
+                div[class: "search-results"] {
+                    ∀ result ∈ &self.results {
+                        div[
+                            class: "search-result-item",
+                            onclick: || self.select_result(result)
+                        ] {
+                            span[class: format!("result-type type-{}", result.entity_type.to_lowercase())] {
+                                result.entity_type.clone()
+                            }
+                            div[class: "result-content"] {
+                                span[class: "result-title"] { result.title.clone() }
+                                ⎇ ≔ snippet = &result.snippet {
+                                    span[class: "result-snippet"] { snippet.clone() }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Loading indicator
+            ⎇ self.loading {
+                div[class: "search-loading"] {
+                    span { "Searching..." }
+                }
+            }
+        }
+    }
+
+    rite scope_btn_class(&self, scope: SearchScope) -> String {
+        ⎇ self.scope == scope {
+            "scope-btn active".to_string()
+        } ⊸ {
+            "scope-btn".to_string()
+        }
+    }
+
+    rite handle_input(&mut self, value: String) {
+        self.on_search(value.clone());
+
+        ⎇ value.len() >= 2 {
+            self.perform_search(value);
+        } ⊸ {
+            self.results = [];
+        }
+    }
+
+    rite handle_keydown(&mut self, e: KeyboardEvent) {
+        ⌥ e.key.as_str() {
+            "Escape" => {
+                self.show_results = nay;
+            },
+            "Enter" => {
+                ⎇ !self.results.is_empty() {
+                    self.select_result(&self.results[0]);
+                }
+            },
+            _ => {},
+        }
+    }
+
+    async rite perform_search(&mut self, query: String) {
+        self.loading = yea;
+
+        ≔ scope_param = ⌥ self.scope {
+            SearchScope·All => "",
+            SearchScope·Treaties => "&types=treaty",
+            SearchScope·Tribes => "&types=tribe",
+            SearchScope·Territories => "&types=territory",
+            SearchScope·Laws => "&types=law",
+        };
+
+        ≔ url = format!("/api/v1/search?q={}{}", url_encode(&query), scope_param);
+
+        ⌥ fetch(&url).await {
+            Response·Ok(response) => {
+                ⌥ response.json::<SearchResponse>().await {
+                    Result·Ok(data) => {
+                        self.results = data.results~;
+                        self.show_results = yea;
+                    },
+                    Result·Err(_) => {},
+                }
+            },
+            Response·Err(_) => {},
+        }
+
+        self.loading = nay;
+    }
+
+    rite select_result(&mut self, result: &SearchResult) {
+        self.show_results = nay;
+        // Navigate to the selected entity
+        // TODO: Use router to navigate
+    }
+}
+
+☉ sigil SearchResponse {
+    results: [SearchResult]~,
+    total: u64!,
+}

@@ -11,12 +11,12 @@
 // ============================================================================
 
 /// Unique identifier for a data source
-sigil SourceId {
-    value: !String,
+☉ sigil SourceId {
+    value: String!,
 }
 
 /// Types of authoritative sources
-sigil SourceType : enum {
+☉ ᛈ SourceType {
     /// Charles J. Kappler's Indian Affairs: Laws and Treaties
     Kappler,
     /// National Archives and Records Administration
@@ -38,17 +38,17 @@ sigil SourceType : enum {
 }
 
 /// Metadata about a data source
-sigil DataSource {
-    id: !SourceId,
-    source_type: !SourceType,
-    name: !String,
-    base_url: !String,
+☉ sigil DataSource {
+    id: SourceId!,
+    source_type: SourceType!,
+    name: String!,
+    base_url: String!,
 
     /// When we last successfully scraped this source
-    last_scraped: ?DateTime,
+    last_scraped: DateTime?,
 
     /// How reliable is this source? (0.0 - 1.0)
-    reliability: !f64,
+    reliability: f64!,
 }
 
 // ============================================================================
@@ -56,37 +56,37 @@ sigil DataSource {
 // ============================================================================
 
 /// A single step in the provenance chain
-sigil ProvenanceStep {
+☉ sigil ProvenanceStep {
     /// Which source provided this data
-    source: !DataSource,
+    source: DataSource!,
 
     /// The raw value as extracted
-    raw_value: ~String,
+    raw_value: String~,
 
     /// When we extracted it
-    extracted_at: !DateTime,
+    extracted_at: DateTime!,
 
     /// Version of the extractor used
-    extractor_version: !String,
+    extractor_version: String!,
 
     /// URL where this specific data was found
-    source_url: !String,
+    source_url: String!,
 }
 
 /// Full provenance chain for a data point
-sigil ProvenanceChain {
+☉ sigil ProvenanceChain {
     /// All sources that contributed to this value
-    steps: ![ProvenanceStep],
+    steps: [ProvenanceStep]!,
 
     /// The final resolved value
-    current_value: ~String,
+    current_value: String~,
 
     /// Our confidence in this value
-    confidence: !Confidence,
+    confidence: Confidence!,
 }
 
 /// Confidence levels for data
-sigil Confidence : enum {
+☉ ᛈ Confidence {
     /// Multiple corroborating sources agree
     Verified,
     /// Single authoritative source
@@ -106,89 +106,89 @@ sigil Confidence : enum {
 // ============================================================================
 
 /// Raw treaty data as scraped from Kappler
-sigil RawTreaty {
+☉ sigil RawTreaty {
     /// Source tracking
-    source: !DataSource,
-    source_url: !String,
-    scraped_at: !DateTime,
+    source: DataSource!,
+    source_url: String!,
+    scraped_at: DateTime!,
 
     /// Kappler-specific identifiers
-    kappler_volume: ?i32,
-    kappler_page: ?i32,
+    kappler_volume: i32?,
+    kappler_page: i32?,
 
     /// Basic info
-    title: ~String,
-    date_signed_text: ?String,
-    date_ratified_text: ?String,
-    date_proclaimed_text: ?String,
+    title: String~,
+    date_signed_text: String?,
+    date_ratified_text: String?,
+    date_proclaimed_text: String?,
 
     /// Parties
-    tribal_parties_text: ~[String],
-    us_commissioners_text: ~[String],
+    tribal_parties_text: [String]~,
+    us_commissioners_text: [String]~,
 
     /// Content
-    preamble: ?String,
-    articles_text: ~[String],
-    signatures_text: ~[String],
+    preamble: String?,
+    articles_text: [String]~,
+    signatures_text: [String]~,
 
     /// Legal citations
-    statutes_at_large_citation: ?String,
+    statutes_at_large_citation: String?,
 
     /// Raw HTML for reprocessing if needed
-    raw_html: !String,
+    raw_html: String!,
 }
 
 /// Raw tribe data as scraped from BIA
-sigil RawTribe {
+☉ sigil RawTribe {
     /// Source tracking
-    source: !DataSource,
-    source_url: !String,
-    scraped_at: !DateTime,
+    source: DataSource!,
+    source_url: String!,
+    scraped_at: DateTime!,
 
     /// BIA identifiers
-    bia_id: ?String,
+    bia_id: String?,
 
     /// Basic info
-    name: ~String,
-    alternate_names: ~[String],
+    name: String~,
+    alternate_names: [String]~,
 
     /// Location
-    region: ?String,
-    state: ?String,
-    headquarters_address: ?String,
+    region: String?,
+    state: String?,
+    headquarters_address: String?,
 
     /// Contact
-    leader_name: ?String,
-    leader_title: ?String,
-    phone: ?String,
-    website: ?String,
+    leader_name: String?,
+    leader_title: String?,
+    phone: String?,
+    website: String?,
 
     /// Recognition
-    federally_recognized: ~bool,
-    recognition_date: ?String,
+    federally_recognized: bool~,
+    recognition_date: String?,
 }
 
 /// NARA archive record
-sigil RawArchiveRecord {
+☉ sigil RawArchiveRecord {
     /// Source tracking
-    source: !DataSource,
-    source_url: !String,
-    scraped_at: !DateTime,
+    source: DataSource!,
+    source_url: String!,
+    scraped_at: DateTime!,
 
     /// NARA identifiers
-    nara_id: !String,
-    record_group: ?String,
-    series: ?String,
+    nara_id: String!,
+    record_group: String?,
+    series: String?,
 
     /// Basic info
-    title: ~String,
-    description: ?String,
+    title: String~,
+    description: String?,
 
     /// Dates
-    date_range_text: ?String,
+    date_range_text: String?,
 
     /// Digital objects (images, PDFs)
-    digital_object_urls: ~[String],
+    digital_object_urls: [String]~,
 }
 
 // ============================================================================
@@ -196,19 +196,19 @@ sigil RawArchiveRecord {
 // ============================================================================
 
 /// Result of validating a piece of data
-sigil ValidationResult {
-    is_valid: !bool,
-    errors: ![ValidationError],
-    warnings: ![ValidationWarning],
+☉ sigil ValidationResult {
+    is_valid: bool!,
+    errors: [ValidationError]!,
+    warnings: [ValidationWarning]!,
 }
 
-sigil ValidationError {
-    field: !String,
-    message: !String,
-    error_type: !ValidationErrorType,
+☉ sigil ValidationError {
+    field: String!,
+    message: String!,
+    error_type: ValidationErrorType!,
 }
 
-sigil ValidationErrorType : enum {
+☉ ᛈ ValidationErrorType {
     MissingRequired,
     InvalidFormat,
     OutOfRange,
@@ -216,13 +216,13 @@ sigil ValidationErrorType : enum {
     FailedCrossReference,
 }
 
-sigil ValidationWarning {
-    field: !String,
-    message: !String,
-    warning_type: !ValidationWarningType,
+☉ sigil ValidationWarning {
+    field: String!,
+    message: String!,
+    warning_type: ValidationWarningType!,
 }
 
-sigil ValidationWarningType : enum {
+☉ ᛈ ValidationWarningType {
     MissingRecommended,
     PossibleTypo,
     UnusualValue,
@@ -235,36 +235,36 @@ sigil ValidationWarningType : enum {
 // ============================================================================
 
 /// When sources disagree
-sigil ConflictRecord {
+☉ sigil ConflictRecord {
     /// What entity has conflicting data
-    entity_type: !String,
-    entity_id: !String,
+    entity_type: String!,
+    entity_id: String!,
 
     /// Which field conflicts
-    field: !String,
+    field: String!,
 
     /// The different versions from different sources
-    versions: ![ConflictVersion],
+    versions: [ConflictVersion]!,
 
     /// Has this been resolved?
-    resolution: ?ConflictResolution,
+    resolution: ConflictResolution?,
 }
 
-sigil ConflictVersion {
-    value: ~String,
-    source: !DataSource,
-    confidence: !Confidence,
+☉ sigil ConflictVersion {
+    value: String~,
+    source: DataSource!,
+    confidence: Confidence!,
 }
 
-sigil ConflictResolution {
-    resolved_value: ~String,
-    resolution_type: !ResolutionType,
-    rationale: !String,
-    resolved_by: ?String,
-    resolved_at: !DateTime,
+☉ sigil ConflictResolution {
+    resolved_value: String~,
+    resolution_type: ResolutionType!,
+    rationale: String!,
+    resolved_by: String?,
+    resolved_at: DateTime!,
 }
 
-sigil ResolutionType : enum {
+☉ ᛈ ResolutionType {
     /// One source deemed more authoritative
     PreferredSource,
     /// Combined from multiple sources
@@ -282,41 +282,41 @@ sigil ResolutionType : enum {
 // ============================================================================
 
 /// Item requiring human review
-sigil ReviewItem {
-    id: !String,
+☉ sigil ReviewItem {
+    id: String!,
 
     /// What type of entity needs review
-    entity_type: !String,
+    entity_type: String!,
 
     /// The raw data to review
-    raw_data: ~String,
+    raw_data: String~,
 
     /// Why does this need review?
-    trigger: !ReviewTrigger,
+    trigger: ReviewTrigger!,
 
     /// How urgent is this?
-    priority: !Priority,
+    priority: Priority!,
 
     /// Sources already consulted
-    sources_consulted: ![DataSource],
+    sources_consulted: [DataSource]!,
 
     /// Any detected conflicts
-    conflicts: ?[ConflictRecord],
+    conflicts: [ConflictRecord]?,
 
     /// Current status
-    status: !ReviewStatus,
+    status: ReviewStatus!,
 
     /// Assignment
-    assigned_to: ?String,
+    assigned_to: String?,
 
     /// Resolution
-    resolution: ?String,
-    resolution_notes: ?String,
-    resolved_by: ?String,
-    resolved_at: ?DateTime,
+    resolution: String?,
+    resolution_notes: String?,
+    resolved_by: String?,
+    resolved_at: DateTime?,
 }
 
-sigil ReviewTrigger : enum {
+☉ ᛈ ReviewTrigger {
     /// New entity discovered
     NewEntity,
     /// Sources disagree
@@ -333,14 +333,14 @@ sigil ReviewTrigger : enum {
     ValidationFailed,
 }
 
-sigil Priority : enum {
+☉ ᛈ Priority {
     Critical,
     High,
     Medium,
     Low,
 }
 
-sigil ReviewStatus : enum {
+☉ ᛈ ReviewStatus {
     Pending,
     InProgress,
     NeedsMoreResearch,

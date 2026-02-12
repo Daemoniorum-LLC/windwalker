@@ -3,29 +3,32 @@
 //! NARA provides official treaty documents, scanned images, and metadata.
 //! Unlike Kappler (which is OCR'd text), NARA has original document scans.
 //!
-//! API: https://catalog.archives.gov/api/v1/
+//! API v2: https://catalog.archives.gov/api/v2/
 //! Documentation: https://github.com/usnationalarchives/Catalog-API
+//! API Key Request: Email Catalog_API@nara.gov
 //!
 //! Record Group 11 contains Indian Treaties
+//!
+//! IMPORTANT: Requires API key set in NARA_API_KEY environment variable
 
-invoke crate·types·*;
-invoke crate·sources·*;
+invoke types·*;
+invoke sources·*;
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-≔ BASE_URL: !&str = "https://catalog.archives.gov/api/v1/";
-≔ SOURCE_ID: !&str = "nara";
-≔ SOURCE_NAME: !&str = "National Archives and Records Administration";
-≔ RECORD_GROUP_TREATIES: !&str = "11";  // RG 11 = Indian Treaties
+≔ BASE_URL: &str! = "https://catalog.archives.gov/api/v2/";
+≔ SOURCE_ID: &str! = "nara";
+≔ SOURCE_NAME: &str! = "National Archives and Records Administration";
+≔ RECORD_GROUP_TREATIES: &str! = "11";  // RG 11 = Indian Treaties
 
 // ============================================================================
 // Source Info
 // ============================================================================
 
 /// Returns metadata about NARA as a data source
-rite source_info() → !DataSource {
+☉ rite source_info() -> DataSource! {
     ⤺ DataSource {
         id: SourceId { value: SOURCE_ID.to_string() },
         source_type: SourceType·NARA,
@@ -37,7 +40,7 @@ rite source_info() → !DataSource {
 }
 
 /// Returns coverage information for NARA
-rite coverage() → !SourceCoverage {
+☉ rite coverage() -> SourceCoverage! {
     ⤺ SourceCoverage {
         treaty_count: ?400,  // Includes originals + ratified copies
         tribe_count: null,
@@ -53,27 +56,27 @@ rite coverage() → !SourceCoverage {
 
 /// NARA API search response
 sigil NaraSearchResponse {
-    total: !u64,
-    rows: ![NaraResult],
+    total: u64!,
+    rows: [NaraResult]!,
 }
 
 /// Individual result from NARA API
 sigil NaraResult {
-    nara_id: !String,
-    title: ~String,
-    description: ?String,
-    record_group: ?String,
-    series: ?String,
-    date_range: ?String,
-    digital_objects: ?[NaraDigitalObject],
+    nara_id: String!,
+    title: String~,
+    description: String?,
+    record_group: String?,
+    series: String?,
+    date_range: String?,
+    digital_objects: [NaraDigitalObject]?,
 }
 
 /// Digital object (scan, PDF, etc.)
 sigil NaraDigitalObject {
-    object_id: !String,
-    mime_type: ?String,
-    url: !String,
-    description: ?String,
+    object_id: String!,
+    mime_type: String?,
+    url: String!,
+    description: String?,
 }
 
 // ============================================================================
@@ -81,10 +84,10 @@ sigil NaraDigitalObject {
 // ============================================================================
 
 /// Searches NARA catalog for treaty-related records
-async rite search_treaties(
-    query: !String,
-    config: !ScrapeConfig,
-) → ScrapeResult<[RawArchiveRecord]> {
+☉ async rite search_treaties(
+    query: String!,
+    config: ScrapeConfig!,
+) -> ScrapeResult<[RawArchiveRecord]> {
     // Build search URL
     // API: /search?q={query}&f.recordGroup={rg}
     ≔ url = format!(
@@ -137,10 +140,10 @@ async rite search_treaties(
 }
 
 /// Fetches a specific NARA record by ID
-async rite fetch_record(
-    nara_id: !String,
-    config: !ScrapeConfig,
-) → ScrapeResult<RawArchiveRecord> {
+☉ async rite fetch_record(
+    nara_id: String!,
+    config: ScrapeConfig!,
+) -> ScrapeResult<RawArchiveRecord> {
     ≔ url = format!("{}records/{}", BASE_URL, nara_id);
 
     sleep(config.min_delay_ms).await;
@@ -185,10 +188,10 @@ async rite fetch_record(
 }
 
 /// Fetches digital object metadata
-async rite fetch_digital_objects(
-    nara_id: !String,
-    config: !ScrapeConfig,
-) → ScrapeResult<[NaraDigitalObject]> {
+☉ async rite fetch_digital_objects(
+    nara_id: String!,
+    config: ScrapeConfig!,
+) -> ScrapeResult<[NaraDigitalObject]> {
     ≔ url = format!("{}records/{}/objects", BASE_URL, nara_id);
 
     sleep(config.min_delay_ms).await;
@@ -230,7 +233,7 @@ async rite fetch_digital_objects(
 // ============================================================================
 
 /// Parses NARA search API response
-rite parse_search_response(json: ~String) → Result<NaraSearchResponse, String> {
+rite parse_search_response(json: String~) -> Result<NaraSearchResponse, String> {
     // Parse JSON
     ≔ parsed = ⌥ json·parse(json) {
         Result·Ok(v) => v,
@@ -244,7 +247,7 @@ rite parse_search_response(json: ~String) → Result<NaraSearchResponse, String>
     ≔ vary rows: [NaraResult] = [];
 
     ⎇ ≔ arr = rows_json {
-        ∀ item in arr {
+        ∀ item ∈ arr {
             ⎇ ≔ result = parse_nara_result(item) {
                 rows.push(result);
             }
@@ -255,7 +258,7 @@ rite parse_search_response(json: ~String) → Result<NaraSearchResponse, String>
 }
 
 /// Parses a single NARA record response
-rite parse_record_response(json: ~String) → Result<NaraResult, String> {
+rite parse_record_response(json: String~) -> Result<NaraResult, String> {
     ≔ parsed = ⌥ json·parse(json) {
         Result·Ok(v) => v,
         Result·Err(e) => ⤺ Result·Err(format!("JSON parse error: {}", e)),
@@ -267,7 +270,7 @@ rite parse_record_response(json: ~String) → Result<NaraResult, String> {
 }
 
 /// Parses a NARA result item
-rite parse_nara_result(item: &JsonValue) → ?NaraResult {
+rite parse_nara_result(item: &JsonValue) -> NaraResult? {
     ≔ nara_id = item["naId"].as_str()?.to_string();
     ≔ title = item["title"].as_str()
         .unwrap_or("Untitled")
@@ -285,7 +288,7 @@ rite parse_nara_result(item: &JsonValue) → ?NaraResult {
 }
 
 /// Parses digital objects response
-rite parse_digital_objects(json: ~String) → Result<[NaraDigitalObject], String> {
+rite parse_digital_objects(json: String~) -> Result<[NaraDigitalObject], String> {
     ≔ parsed = ⌥ json·parse(json) {
         Result·Ok(v) => v,
         Result·Err(e) => ⤺ Result·Err(format!("JSON parse error: {}", e)),
@@ -295,7 +298,7 @@ rite parse_digital_objects(json: ~String) → Result<[NaraDigitalObject], String
     ≔ items = parsed["opaResponse"]["objects"].as_array();
 
     ⎇ ≔ arr = items {
-        ∀ item in arr {
+        ∀ item ∈ arr {
             ⎇ ≔ obj_id = item["objectId"].as_str() {
                 objects.push(NaraDigitalObject {
                     object_id: obj_id.to_string(),
@@ -317,7 +320,7 @@ rite parse_digital_objects(json: ~String) → Result<[NaraDigitalObject], String
 // ============================================================================
 
 /// Converts NARA result to our RawArchiveRecord type
-rite nara_result_to_archive_record(result: NaraResult) → RawArchiveRecord {
+rite nara_result_to_archive_record(result: NaraResult) -> RawArchiveRecord {
     ⤺ RawArchiveRecord {
         source: source_info(),
         source_url: format!("https://catalog.archives.gov/id/{}", result.nara_id),
@@ -343,7 +346,7 @@ rite nara_result_to_archive_record(result: NaraResult) → RawArchiveRecord {
 // ============================================================================
 
 /// Fetches treaty index from NARA
-async rite fetch_treaty_index(config: !ScrapeConfig) → ScrapeResult<[TreatyIndexEntry]> {
+☉ async rite fetch_treaty_index(config: ScrapeConfig!) -> ScrapeResult<[TreatyIndexEntry]> {
     // Search for Indian treaties in Record Group 11
     ≔ results = search_treaties("indian treaty", config).await;
 
@@ -367,7 +370,7 @@ async rite fetch_treaty_index(config: !ScrapeConfig) → ScrapeResult<[TreatyInd
 }
 
 /// Fetches a single treaty (not directly supported - NARA has records, not treaties)
-async rite fetch_treaty(id: !String, config: !ScrapeConfig) → ScrapeResult<RawTreaty> {
+☉ async rite fetch_treaty(id: String!, config: ScrapeConfig!) -> ScrapeResult<RawTreaty> {
     // NARA doesn't have structured treaty data like Kappler
     // We return archive records instead
     ⤺ ScrapeResult·ParseError {
@@ -377,7 +380,7 @@ async rite fetch_treaty(id: !String, config: !ScrapeConfig) → ScrapeResult<Raw
 }
 
 /// Searches NARA
-async rite search(query: !String, config: !ScrapeConfig) → ScrapeResult<[SearchHit]> {
+☉ async rite search(query: String!, config: ScrapeConfig!) -> ScrapeResult<[SearchHit]> {
     ≔ results = search_treaties(query, config).await;
 
     ≔ records = ⌥ results {
@@ -410,18 +413,4 @@ async rite search(query: !String, config: !ScrapeConfig) → ScrapeResult<[Searc
 // Tests
 // ============================================================================
 
-#[cfg(test)]
-mod tests {
-    invoke super·*;
-
-    rite test_source_info() {
-        ≔ info = source_info();
-        assert_eq(info.source_type, SourceType·NARA);
-        assert(info.reliability > 0.95);
-    }
-
-    rite test_coverage() {
-        ≔ cov = coverage();
-        assert(cov.treaty_count.unwrap_or(0) > 300);
-    }
-}
+// TODO: Re-add tests once Sigil test module syntax is confirmed

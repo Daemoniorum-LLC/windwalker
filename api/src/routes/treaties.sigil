@@ -1,0 +1,474 @@
+//! Treaty API Endpoints
+//!
+//! CRUD operations for treaty data.
+
+invoke sigil_http·{Request, Response, Query};
+invoke serde_json·json;
+invoke types·*;
+
+// ============================================================================
+// List Treaties
+// ============================================================================
+
+/// GET /api/v1/treaties
+///
+/// Query parameters:
+/// - tribe: Filter by tribe ID
+/// - status: Filter by status (Active, Violated, Abrogated, Superseded, Disputed)
+/// - date_from: Filter by signed date (YYYY-MM-DD)
+/// - date_to: Filter by signed date (YYYY-MM-DD)
+/// - bbox: Bounding box filter (min_lng,min_lat,max_lng,max_lat)
+/// - limit: Maximum results (default 50, max 500)
+/// - offset: Pagination offset
+/// - sort: Sort field (date, name, status)
+/// - order: Sort order (asc, desc)
+☉ async rite list_treaties(req: Request, state: &AppState) -> Response {
+    // Parse query parameters
+    ≔ query = req.query::<TreatyListQuery>().unwrap_or_default();
+
+    ≔ limit = query.limit.unwrap_or(50).min(500);
+    ≔ offset = query.offset.unwrap_or(0);
+
+    // Build SQL query with filters
+    ≔ vary sql = String::from("
+        SELECT
+            t.id,
+            t.title,
+            t.date_signed,
+            t.date_ratified,
+            COALESCE(
+                (SELECT json_agg(json_build_object('id', tr.id, 'name', tr.name))
+                 FROM raw_tribes tr
+                 WHERE tr.id::text = ANY(SELECT jsonb_array_elements_text(t.tribal_parties_text))),
+                '[]'::json
+            ) as tribes,
+            CASE
+                WHEN t.validation_errors IS NOT NULL THEN 'Disputed'
+                WHEN t.is_validated THEN 'Active'
+                ELSE 'Unknown'
+            END as status,
+            CASE
+                WHEN t.is_validated THEN 'Verified'
+                ELSE 'Reported'
+            END as certainty,
+            t.kappler_volume,
+            t.kappler_page
+        FROM raw_treaties t
+        WHERE 1=1
+    ");
+
+    ≔ vary params: Vec<Box<dyn ToSql>> = vec![];
+    ≔ vary param_idx = 1;
+
+    // Apply filters
+    ⎇ ≔ tribe_id = &query.tribe {
+        sql.push_str(&format!(" AND t.tribal_parties_text @> ${}::jsonb", param_idx));
+        params.push(Box::new(format!("[\"{}\"]", tribe_id)));
+        param_idx += 1;
+    }
+
+    ⎇ ≔ status = &query.status {
+        // Status filter based on validation state
+        ⌥ status.as_str() {
+            "Active" => sql.push_str(" AND t.is_validated = true AND t.validation_errors IS NULL"),
+            "Violated" => sql.push_str(" AND t.validation_errors IS NOT NULL"),
+            _ => {},
+        }
+    }
+
+    ⎇ ≔ date_from = &query.date_from {
+        sql.push_str(&format!(" AND t.date_signed >= ${}", param_idx));
+        params.push(Box::new(date_from.clone()));
+        param_idx += 1;
+    }
+
+    ⎇ ≔ date_to = &query.date_to {
+        sql.push_str(&format!(" AND t.date_signed <= ${}", param_idx));
+        params.push(Box::new(date_to.clone()));
+        param_idx += 1;
+    }
+
+    // Bounding box filter (requires PostGIS spatial index on treaty geometries)
+    ⎇ ≔ bbox = &query.bbox {
+        ≔ parts: Vec<f64> = bbox.split(',')
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        ⎇ parts.len() == 4 {
+            sql.push_str(&format!(
+                " AND EXISTS (
+                    SELECT 1 FROM treaty_geometries tg
+                    WHERE tg.treaty_id = t.id
+                    AND ST_Intersects(tg.geometry, ST_MakeEnvelope(${}, ${}, ${}, ${}, 4326))
+                )",
+                param_idx, param_idx + 1, param_idx + 2, param_idx + 3
+            ));
+            params.push(Box::new(parts[0]));
+            params.push(Box::new(parts[1]));
+            params.push(Box::new(parts[2]));
+            params.push(Box::new(parts[3]));
+            param_idx += 4;
+        }
+    }
+
+    // Sorting
+    ≔ sort_field = query.sort.as_deref().unwrap_or("date");
+    ≔ sort_order = query.order.as_deref().unwrap_or("desc");
+
+    ≔ order_clause = ⌥ sort_field {
+        "name" => "t.title",
+        "status" => "status",
+        _ => "t.date_signed",
+    };
+
+    sql.push_str(&format!(
+        " ORDER BY {} {} NULLS LAST LIMIT ${} OFFSET ${}",
+        order_clause,
+        ⎇ sort_order == "asc" { "ASC" } ⊸ { "DESC" },
+        param_idx,
+        param_idx + 1
+    ));
+    params.push(Box::new(limit as i64));
+    params.push(Box::new(offset as i64));
+
+    // Execute query
+    ⌥ state.db.query(&sql, &params).await {
+        Result·Ok(rows) => {
+            ≔ treaties: Vec<TreatySummary> = rows.iter().map(|row| {
+                TreatySummary {
+                    id: row.get("id"),
+                    name: row.get("title"),
+                    signed_date: row.get("date_signed"),
+                    tribes: serde_json::from_value(row.get("tribes")).unwrap_or_default(),
+                    status: row.get("status"),
+                    certainty: row.get("certainty"),
+                    kappler_ref: format_kappler_ref(
+                        row.get("kappler_volume"),
+                        row.get("kappler_page")
+                    ),
+                }
+            }).collect();
+
+            // Get total count for pagination
+            ≔ count_sql = sql.replace(
+                "SELECT t.id,",
+                "SELECT COUNT(*) as total FROM (SELECT t.id,"
+            ).replace(
+                &format!(" LIMIT ${} OFFSET ${}", param_idx, param_idx + 1),
+                ") subq"
+            );
+
+            ≔ total = state.db.query_one(&count_sql, &params[..params.len()-2])
+                .await
+                .map(|row| row.get::<i64>("total"))
+                .unwrap_or(treaties.len() as i64);
+
+            Response::json(json!({
+                "treaties": treaties,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }))
+        },
+        Result·Err(e) => {
+            Response::json(json!({
+                "error": "Failed to fetch treaties",
+                "details": format!("{}", e)
+            })).status(500)
+        },
+    }
+}
+
+// ============================================================================
+// Get Single Treaty
+// ============================================================================
+
+/// GET /api/v1/treaties/:id
+☉ async rite get_treaty(req: Request, state: &AppState) -> Response {
+    ≔ treaty_id = req.param("id");
+
+    ≔ query = "
+        SELECT
+            t.id,
+            t.title,
+            t.date_signed_text,
+            t.date_signed,
+            t.date_ratified_text,
+            t.date_ratified,
+            t.date_proclaimed_text,
+            t.date_proclaimed,
+            t.tribal_parties_text,
+            t.us_commissioners_text,
+            t.signatures_text,
+            t.preamble,
+            t.articles_text,
+            t.statutes_at_large_citation,
+            t.kappler_volume,
+            t.kappler_page,
+            t.is_validated,
+            t.validation_errors,
+            t.validation_warnings,
+            t.source_url,
+            t.scraped_at,
+            ds.name as source_name,
+            ds.reliability as source_reliability
+        FROM raw_treaties t
+        JOIN data_sources ds ON t.source_id = ds.id
+        WHERE t.id = $1
+    ";
+
+    ⌥ state.db.query_opt(query, &[&treaty_id]).await {
+        Result·Ok(Some(row)) => {
+            ≔ treaty = TreatyDetail {
+                id: row.get("id"),
+                name: row.get("title"),
+                alternate_names: vec![],
+
+                signed_date: row.get("date_signed"),
+                signed_date_text: row.get("date_signed_text"),
+                ratified_date: row.get("date_ratified"),
+                proclaimed_date: row.get("date_proclaimed"),
+
+                tribes: parse_json_array(row.get("tribal_parties_text")),
+                us_commissioners: parse_json_array(row.get("us_commissioners_text")),
+                tribal_signatories: parse_signatories(row.get("signatures_text")),
+
+                status: determine_status(&row),
+                violations: vec![],  // TODO: Fetch from violations table
+                affecting_laws: vec![],  // TODO: Fetch from laws table
+
+                preamble: row.get("preamble"),
+                articles: parse_articles(row.get("articles_text")),
+
+                ceded_territory_acres: null,  // TODO: Calculate from geometry
+                reserved_territory_acres: null,
+                boundary_certainty: ⎇ row.get::<bool>("is_validated") {
+                    "Verified".to_string()
+                } ⊸ {
+                    "Reported".to_string()
+                },
+
+                sources: vec![SourceInfo {
+                    name: row.get("source_name"),
+                    source_type: "Government".to_string(),
+                    url: row.get("source_url"),
+                    reliability: row.get("source_reliability"),
+                    accessed_date: row.get::<Option<String>>("scraped_at"),
+                }],
+
+                kappler_citation: format_kappler_ref(
+                    row.get("kappler_volume"),
+                    row.get("kappler_page")
+                ),
+                statutes_at_large: row.get("statutes_at_large_citation"),
+            };
+
+            Response::json(treaty)
+        },
+        Result·Ok(None) => {
+            Response::json(json!({
+                "error": "Treaty not found"
+            })).status(404)
+        },
+        Result·Err(e) => {
+            Response::json(json!({
+                "error": "Database error",
+                "details": format!("{}", e)
+            })).status(500)
+        },
+    }
+}
+
+// ============================================================================
+// Get Treaty Geometry
+// ============================================================================
+
+/// GET /api/v1/treaties/:id/geometry
+///
+/// Query parameters:
+/// - format: Output format (geojson, mvt) - default geojson
+/// - simplify: Simplification tolerance (default 0)
+☉ async rite get_treaty_geometry(req: Request, state: &AppState) -> Response {
+    ≔ treaty_id = req.param("id");
+    ≔ query_params = req.query::<GeometryQuery>().unwrap_or_default();
+    ≔ format = query_params.format.as_deref().unwrap_or("geojson");
+
+    ≔ simplify = query_params.simplify.unwrap_or(0.0);
+
+    ≔ sql = ⎇ simplify > 0.0 {
+        format!("
+            SELECT
+                ST_AsGeoJSON(ST_Simplify(geometry, {})) as geojson,
+                territory_type,
+                certainty::text
+            FROM treaty_geometries
+            WHERE treaty_id = $1
+        ", simplify)
+    } ⊸ {
+        "
+            SELECT
+                ST_AsGeoJSON(geometry) as geojson,
+                territory_type,
+                certainty::text
+            FROM treaty_geometries
+            WHERE treaty_id = $1
+        ".to_string()
+    };
+
+    ⌥ state.db.query(&sql, &[&treaty_id]).await {
+        Result·Ok(rows) => {
+            ⎇ rows.is_empty() {
+                ⤺ Response::json(json!({
+                    "error": "No geometry found for treaty"
+                })).status(404);
+            }
+
+            ≔ features: Vec<serde_json::Value> = rows.iter().map(|row| {
+                ≔ geom: serde_json::Value = serde_json::from_str(
+                    row.get::<&str>("geojson")
+                ).unwrap_or(json!(null));
+
+                json!({
+                    "type": "Feature",
+                    "geometry": geom,
+                    "properties": {
+                        "treaty_id": treaty_id,
+                        "territory_type": row.get::<String>("territory_type"),
+                        "certainty": row.get::<String>("certainty")
+                    }
+                })
+            }).collect();
+
+            Response::json(json!({
+                "type": "FeatureCollection",
+                "features": features
+            }))
+        },
+        Result·Err(e) => {
+            Response::json(json!({
+                "error": "Failed to fetch geometry",
+                "details": format!("{}", e)
+            })).status(500)
+        },
+    }
+}
+
+// ============================================================================
+// Get Treaty Articles
+// ============================================================================
+
+/// GET /api/v1/treaties/:id/articles
+☉ async rite get_treaty_articles(req: Request, state: &AppState) -> Response {
+    ≔ treaty_id = req.param("id");
+
+    ≔ query = "
+        SELECT articles_text
+        FROM raw_treaties
+        WHERE id = $1
+    ";
+
+    ⌥ state.db.query_opt(query, &[&treaty_id]).await {
+        Result·Ok(Some(row)) => {
+            ≔ articles = parse_articles(row.get("articles_text"));
+            Response::json(json!({ "articles": articles }))
+        },
+        Result·Ok(None) => {
+            Response::json(json!({ "error": "Treaty not found" })).status(404)
+        },
+        Result·Err(e) => {
+            Response::json(json!({
+                "error": "Database error",
+                "details": format!("{}", e)
+            })).status(500)
+        },
+    }
+}
+
+// ============================================================================
+// Get Treaty Signatories
+// ============================================================================
+
+/// GET /api/v1/treaties/:id/signatories
+☉ async rite get_treaty_signatories(req: Request, state: &AppState) -> Response {
+    ≔ treaty_id = req.param("id");
+
+    ≔ query = "
+        SELECT us_commissioners_text, signatures_text
+        FROM raw_treaties
+        WHERE id = $1
+    ";
+
+    ⌥ state.db.query_opt(query, &[&treaty_id]).await {
+        Result·Ok(Some(row)) => {
+            Response::json(json!({
+                "us_commissioners": parse_json_array(row.get("us_commissioners_text")),
+                "tribal_signatories": parse_signatories(row.get("signatures_text"))
+            }))
+        },
+        Result·Ok(None) => {
+            Response::json(json!({ "error": "Treaty not found" })).status(404)
+        },
+        Result·Err(e) => {
+            Response::json(json!({
+                "error": "Database error",
+                "details": format!("{}", e)
+            })).status(500)
+        },
+    }
+}
+
+// ============================================================================
+// Query Types
+// ============================================================================
+
+#[derive(Default, Deserialize)]
+☉ sigil TreatyListQuery {
+    tribe: ?String,
+    status: ?String,
+    date_from: ?String,
+    date_to: ?String,
+    bbox: ?String,
+    limit: ?u32,
+    offset: ?u32,
+    sort: ?String,
+    order: ?String,
+}
+
+#[derive(Default, Deserialize)]
+☉ sigil GeometryQuery {
+    format: ?String,
+    simplify: ?f64,
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+rite format_kappler_ref(volume: Option<i32>, page: Option<i32>) -> ?String {
+    ⌥ (volume, page) {
+        (Some(v), Some(p)) => ?format!("Kappler Vol. {}, p. {}", v, p),
+        _ => null,
+    }
+}
+
+rite parse_json_array(json: Option<serde_json::Value>) -> Vec<String> {
+    json.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+rite parse_signatories(json: Option<serde_json::Value>) -> Vec<SignatoryInfo> {
+    json.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+rite parse_articles(json: Option<serde_json::Value>) -> Vec<ArticleInfo> {
+    json.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default()
+}
+
+rite determine_status(row: &Row) -> String {
+    ⎇ row.get::<Option<serde_json::Value>>("validation_errors").is_some() {
+        "Disputed".to_string()
+    } ⊸ ⎇ row.get::<bool>("is_validated") {
+        "Active".to_string()
+    } ⊸ {
+        "Unknown".to_string()
+    }
+}
