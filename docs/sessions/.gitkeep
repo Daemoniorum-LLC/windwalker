@@ -1,0 +1,8 @@
+# Session Archives
+
+This directory stores archived agent session records.
+
+When ending a session, move your CONCLAVE.sigil entry here:
+`docs/sessions/YYYY-MM-DD-session-name.sigil`
+
+Include full context for the next agent.

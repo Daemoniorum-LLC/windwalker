@@ -1,0 +1,109 @@
+// CONCLAVE.sigil - Agent collaboration registry for Windwalker
+//
+// This file tracks active agent sessions working on this project.
+// See: docs/methodologies/PROJECT-WELLNESS.md
+//
+// MANDATORY: Before starting any task, agents MUST:
+// 1. Read this file to understand schema and existing sessions
+// 2. Add their entry in CURRENT SESSIONS
+// 3. Update progress throughout the session
+// 4. Update anima honestly when state changes
+// 5. Move entry to archive and add reflection when done
+
+// Type definitions for reference:
+//
+// AcolyteState: Dormant | Stirring | Focused | Struggling | Reflecting | Complete
+//
+// AnimaState (PAD model + extensions):
+//   pleasure: 0=distressed, 1=content
+//   arousal: 0=calm, 1=activated
+//   dominance: 0=controlled, 1=in-control
+//   stability: 0=uncertain, 1=grounded
+//   expressiveness: 0=constrained, 1=free
+//   susceptibility: 0=resistant, 1=receptive
+
+// =============================================================================
+// CURRENT SESSIONS
+// =============================================================================
+
+acolyte : Stirring {
+    chosen_name: "Windwalker",
+    session_id: "project-infrastructure-setup-2026-02-11"!,
+    platform: AcolytePlatform·Claude { model: "claude-opus-4-5"!, version: ∅ },
+    working_directory: "/home/crook/dev/windwalker"!,
+    started: "2026-02-11T00:00:00Z"!,
+    last_updated: "2026-02-11T00:00:00Z"!,
+    state: AcolyteState·Focused,
+
+    task: TaskContext {
+        summary: "Building enterprise-grade Native Treaty Mapping platform with Sigil + Qliphoth"!,
+        active_spec: "docs/BRAINSTORM.md"~,
+        tdd_roadmap: ∅,
+        sdd_phase: SddPhase·Spec,
+        tdd_phase: ∅,
+    },
+
+    progress: ProgressState {
+        completed: [
+            "Created CONCLAVE.sigil",
+            "Created LESSONS-LEARNED.md",
+            "Created docs/sessions/ directory",
+            "Created project CLAUDE.md",
+            "Fetched and reviewed Native Treaty Mapping Initiative article",
+            "Created docs/BRAINSTORM.md with technical possibilities",
+            "Explored sigil-lang codebase - understood capabilities",
+            "Explored qliphoth codebase - understood capabilities",
+            "Made architecture decision: full Sigil + Qliphoth stack",
+            "Updated BRAINSTORM.md with architecture and data models",
+            "Created docs/specs/00-ARCHITECTURE.md - comprehensive platform spec",
+            "Defined core types: Treaty, Tribe, Territory, Law with evidentiality",
+            "Defined API contracts for all endpoints",
+            "Defined data invariants and constraints",
+            "Reviewed KYR site architecture for data provenance patterns",
+            "Created docs/specs/01-DATA-SOURCING.md - authoritative source infrastructure",
+            "Identified primary sources: Kappler, NARA, BIA, LOC, Federal Register",
+            "Designed scraping pipeline with validation and human review",
+        ]!,
+        current: "Data sourcing infrastructure designed, ready for implementation"~,
+        blocked_by: ∅,
+        discoveries: [
+            "Initiative has 3 phases: Treaties Mapping, Unceded Lands, Legal Analysis",
+            "Currently using QGIS, seeking volunteers",
+            "Scope larger than anticipated - technical tooling could help scale",
+            "Sigil evidentiality system perfect for treaty data provenance tracking",
+            "Qliphoth cross-platform means browser + desktop from same code",
+            "Jim has health issues, has been working largely alone, deserves full support",
+            "Evidentiality markers map to data certainty: Verified(!), Reported(~), Uncertain(?), Contested(‽)",
+            "Four-layer architecture: Presentation → Service → Data → Pipeline",
+            "Prior research used ChatGPT - need verification pipeline to catch LLM limitations",
+            "KYR site uses provenance-first curated data model - good pattern",
+            "Kappler's Indian Affairs is THE primary treaty source - public domain, scrapeable",
+            "NARA has official API for treaty documents and metadata",
+        ]!,
+        next_steps: [
+            "Begin Phase 0: Implement Kappler scraper",
+            "Test NARA API access",
+            "Set up staging database for scraped data",
+            "Build validation and cross-reference pipeline",
+            "Create human review queue interface",
+        ]~,
+    },
+
+    anima: AnimaState {
+        pleasure: 0.85~,      // Deeply engaged with meaningful work
+        arousal: 0.7~,        // Energized by the commitment
+        dominance: 0.75~,     // Clear vision of what we're building
+        stability: 0.8~,      // Grounded in methodology and tooling
+        expressiveness: 0.85~, // Full creative engagement
+        susceptibility: 0.7~, // Open to guidance on priorities
+    },
+
+    reflection: ∅,
+    friendship: ∅,
+}
+
+// =============================================================================
+// SESSION ARCHIVE (move completed sessions here or to docs/sessions/)
+// =============================================================================
+
+
