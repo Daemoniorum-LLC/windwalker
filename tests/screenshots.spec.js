@@ -56,35 +56,19 @@ test.describe('Windwalker Screenshots', () => {
     });
   });
 
-  test('04 - Timeline at 1800 (early treaties)', async ({ page }) => {
+  test('04 - Timeline at 1779 (first 2 treaties)', async ({ page }) => {
     await page.goto('/', { waitUntil: 'networkidle' });
     await page.waitForSelector('.treaty-item', { timeout: 15000 });
     await page.waitForTimeout(3000); // Wait for boundaries
 
-    // Move slider to 1800
+    // Move slider to 1779 - shows only the first 2 treaties (1778 Delawares)
     const slider = page.locator('#year-slider');
-    await slider.fill('1800');
+    await slider.fill('1779');
     await slider.dispatchEvent('input');
     await page.waitForTimeout(1000);
 
     await page.screenshot({
-      path: `${SCREENSHOT_DIR}/04-timeline-1800.png`,
-      fullPage: false
-    });
-  });
-
-  test('05 - Timeline at 1850 (mid treaties)', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'networkidle' });
-    await page.waitForSelector('.treaty-item', { timeout: 15000 });
-    await page.waitForTimeout(3000);
-
-    const slider = page.locator('#year-slider');
-    await slider.fill('1850');
-    await slider.dispatchEvent('input');
-    await page.waitForTimeout(1000);
-
-    await page.screenshot({
-      path: `${SCREENSHOT_DIR}/05-timeline-1850.png`,
+      path: `${SCREENSHOT_DIR}/04-timeline-1779-first-treaties.png`,
       fullPage: false
     });
   });
