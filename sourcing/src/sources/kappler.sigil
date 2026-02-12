@@ -1,0 +1,545 @@
+//! Kappler's Indian Affairs: Laws and Treaties Scraper
+//!
+//! Charles J. Kappler's "Indian Affairs: Laws and Treaties" is the definitive
+//! compilation of treaties between the United States and Native American tribes.
+//!
+//! Source: https://oklegal.onenet.net/kappler/
+//! Status: Public Domain
+//! Coverage: 370+ treaties (1778-1883)
+//!
+//! Volume II contains the treaties, organized chronologically.
+
+invoke types·*;
+invoke sources·*;
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+≔ BASE_URL: &str! = "https://oklegal.onenet.net/kappler/";
+≔ VOLUME_2_INDEX: &str! = "Vol2/Htm/V2Treatie.htm";
+≔ SOURCE_ID: &str! = "kappler";
+≔ SOURCE_NAME: &str! = "Kappler's Indian Affairs: Laws and Treaties";
+
+// ============================================================================
+// Source Info
+// ============================================================================
+
+/// Returns metadata about Kappler as a data source
+☉ rite source_info() -> DataSource! {
+    ⤺ DataSource {
+        id: SourceId { value: SOURCE_ID.to_string() },
+        source_type: SourceType·Kappler,
+        name: SOURCE_NAME.to_string(),
+        base_url: BASE_URL.to_string(),
+        last_scraped: null,
+        reliability: 0.98,  // Very high - official legal compilation
+    };
+}
+
+/// Returns coverage information for Kappler
+☉ rite coverage() -> SourceCoverage! {
+    ⤺ SourceCoverage {
+        treaty_count: ?375,
+        tribe_count: null,  // Tribes are within treaties, not separate
+        date_range: ?("1778", "1883"),
+        geographic_scope: ?"Continental United States",
+        source_last_updated: ?"1904 (original publication)",
+    };
+}
+
+// ============================================================================
+// Index Scraping
+// ============================================================================
+
+/// Fetches the treaty index from Kappler Volume II
+///
+/// The index page lists all treaties with:
+/// - Treaty name/title
+/// - Date
+/// - Page number (links to full text)
+☉ async rite fetch_treaty_index(config: ScrapeConfig!) -> ScrapeResult<[TreatyIndexEntry]> {
+    ≔ url = format!("{}{}", BASE_URL, VOLUME_2_INDEX);
+
+    // Fetch the index page
+    ≔ response = ⌥ http·get(url)
+        .header("User-Agent", config.user_agent)
+        .timeout(30000)
+        .await {
+        Response·Ok(r) => r,
+        Response·Timeout => ⤺ ScrapeResult·NetworkError {
+            message: "Timeout fetching Kappler index".to_string(),
+        },
+        Response·Err(e) => ⤺ ScrapeResult·NetworkError {
+            message: format!("Network error: {}", e),
+        },
+    };
+
+    // Check status
+    ⎇ response.status != 200 {
+        ⤺ ScrapeResult·NetworkError {
+            message: format!("HTTP {}: {}", response.status, response.status_text),
+        };
+    }
+
+    // Parse the HTML
+    ≔ html = response.text().await;
+    ≔ entries = parse_treaty_index(html);
+
+    ⌥ entries {
+        Result·Ok(list) => ⤺ ScrapeResult·Ok { data: list, cached: nay },
+        Result·Err(e) => ⤺ ScrapeResult·ParseError {
+            message: e,
+            raw: ?html,
+        },
+    }
+}
+
+/// Parses the Kappler treaty index HTML
+///
+/// The index is an HTML table with treaty names and page links.
+/// Format varies but generally:
+/// - Treaty title (often includes tribal names and date)
+/// - Link to page number
+rite parse_treaty_index(html: String~) -> Result<[TreatyIndexEntry], String> {
+    ≔ vary entries: [TreatyIndexEntry] = [];
+
+    // The Kappler index uses <a href="..."> links to individual pages
+    // Pattern: <a href="../treaties/tre0001.htm">Treaty title text</a>
+
+    // Extract all treaty links
+    ≔ link_pattern = regex("href=\"\\.\\./(treaties/[^\"]+\\.htm)\"[^>]*>([^<]+)</a>");
+
+    ∀ capture ∈ link_pattern.find_all(html) {
+        ≔ path = capture.group(1);
+        ≔ title_raw = capture.group(2);
+
+        // Clean up title
+        ≔ title = html_decode(title_raw.trim());
+
+        // Try to extract date from title (usually in format "Month Day, Year")
+        ≔ date = extract_date_from_title(title);
+
+        // Try to extract tribal names from title
+        ≔ tribes = extract_tribes_from_title(title);
+
+        // Build full URL
+        ≔ full_url = format!("{}Vol2/{}", BASE_URL, path);
+
+        // Extract page number from path (e.g., "tre0001.htm" -> 1)
+        ≔ page_num = extract_page_number(path);
+
+        entries.push(TreatyIndexEntry {
+            id: format!("kappler-v2-p{}", page_num.unwrap_or(0)),
+            title: title~,
+            date: date,
+            tribes: tribes~,
+            url: full_url,
+        });
+    }
+
+    ⎇ entries.is_empty() {
+        ⤺ Result·Err("No treaty entries found in index".to_string());
+    }
+
+    ⤺ Result·Ok(entries);
+}
+
+// ============================================================================
+// Individual Treaty Scraping
+// ============================================================================
+
+/// Fetches a single treaty from Kappler
+☉ async rite fetch_treaty(id: String!, config: ScrapeConfig!) -> ScrapeResult<RawTreaty> {
+    // Parse the ID to get the URL
+    // ID format: "kappler-v2-pNNN" where NNN is page number
+    ≔ page_num = ⌥ parse_kappler_id(id) {
+        ?Some(n) => n,
+        ?None => ⤺ ScrapeResult·ParseError {
+            message: format!("Invalid Kappler ID: {}", id),
+            raw: null,
+        },
+    };
+
+    ≔ url = format!("{}Vol2/treaties/tre{:04}.htm", BASE_URL, page_num);
+
+    // Respectful delay
+    sleep(config.min_delay_ms).await;
+
+    // Fetch the treaty page
+    ≔ response = ⌥ http·get(url.clone())
+        .header("User-Agent", config.user_agent)
+        .timeout(30000)
+        .await {
+        Response·Ok(r) => r,
+        Response·Timeout => ⤺ ScrapeResult·NetworkError {
+            message: "Timeout fetching treaty".to_string(),
+        },
+        Response·Err(e) => ⤺ ScrapeResult·NetworkError {
+            message: format!("Network error: {}", e),
+        },
+    };
+
+    ⎇ response.status == 404 {
+        ⤺ ScrapeResult·NotFound;
+    }
+
+    ⎇ response.status != 200 {
+        ⤺ ScrapeResult·NetworkError {
+            message: format!("HTTP {}", response.status),
+        };
+    }
+
+    ≔ html = response.text().await;
+    ≔ treaty = parse_treaty_page(html, url, page_num);
+
+    ⌥ treaty {
+        Result·Ok(t) => ⤺ ScrapeResult·Ok { data: t, cached: nay },
+        Result·Err(e) => ⤺ ScrapeResult·ParseError {
+            message: e,
+            raw: ?html,
+        },
+    }
+}
+
+/// Parses a Kappler treaty page HTML into structured data
+rite parse_treaty_page(html: String~, url: String!, page_num: i32!) -> Result<RawTreaty, String> {
+    // Kappler treaty pages have a consistent structure:
+    // - Title at top
+    // - Preamble
+    // - Numbered articles
+    // - Signatures at bottom
+    // - Often includes Statutes at Large citation
+
+    // Extract title (usually in <h2> or <b> at top)
+    ≔ title = extract_treaty_title(html)
+        .unwrap_or("Unknown Treaty".to_string());
+
+    // Extract dates
+    ≔ date_signed = extract_date_pattern(html, "concluded|signed|made");
+    ≔ date_ratified = extract_date_pattern(html, "ratified");
+    ≔ date_proclaimed = extract_date_pattern(html, "proclaimed");
+
+    // Extract tribal parties
+    ≔ tribal_parties = extract_tribal_parties(html);
+
+    // Extract US commissioners
+    ≔ us_commissioners = extract_us_commissioners(html);
+
+    // Extract preamble (text before ARTICLE I or ART. 1)
+    ≔ preamble = extract_preamble(html);
+
+    // Extract articles
+    ≔ articles = extract_articles(html);
+
+    // Extract signatures
+    ≔ signatures = extract_signatures(html);
+
+    // Extract Statutes at Large citation
+    ≔ stat_citation = extract_stat_citation(html);
+
+    ⤺ Result·Ok(RawTreaty {
+        source: source_info(),
+        source_url: url,
+        scraped_at: DateTime·now(),
+
+        kappler_volume: ?2,
+        kappler_page: ?page_num,
+
+        title: title~,
+        date_signed_text: date_signed,
+        date_ratified_text: date_ratified,
+        date_proclaimed_text: date_proclaimed,
+
+        tribal_parties_text: tribal_parties~,
+        us_commissioners_text: us_commissioners~,
+
+        preamble: preamble,
+        articles_text: articles~,
+        signatures_text: signatures~,
+
+        statutes_at_large_citation: stat_citation,
+
+        raw_html: html.to_string(),
+    });
+}
+
+// ============================================================================
+// HTML Parsing Helpers
+// ============================================================================
+
+/// Extracts treaty title from HTML
+rite extract_treaty_title(html: String~) -> String? {
+    // Try <h2> first
+    ⎇ ≔ m = regex("<h2[^>]*>([^<]+)</h2>").find(html) {
+        ⤺ ?html_decode(m.group(1).trim());
+    }
+    // Try <b> at start
+    ⎇ ≔ m = regex("<b>([^<]+)</b>").find(html) {
+        ⤺ ?html_decode(m.group(1).trim());
+    }
+    ⤺ null;
+}
+
+/// Extracts a date near a keyword (e.g., "signed", "ratified")
+rite extract_date_pattern(html: String~, keyword: &str!) -> String? {
+    // Pattern: keyword followed by date within reasonable distance
+    ≔ pattern = format!(
+        "{}[^.]*?((?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{{1,2}},?\\s+\\d{{4}})",
+        keyword
+    );
+    ⎇ ≔ m = regex(pattern).find_case_insensitive(html) {
+        ⤺ ?m.group(1).to_string();
+    }
+    ⤺ null;
+}
+
+/// Extracts tribal party names from treaty text
+rite extract_tribal_parties(html: String~) -> [String] {
+    ≔ vary tribes: [String] = [];
+
+    // Common patterns:
+    // "the X nation"
+    // "the X tribe"
+    // "the X Indians"
+    // "the X band"
+
+    ≔ patterns = [
+        "(?:the\\s+)([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)\\s+(?:Nation|Tribe|Indians|Band)",
+        "(?:with\\s+the\\s+)([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+    ];
+
+    ∀ pattern ∈ patterns {
+        ∀ capture ∈ regex(pattern).find_all(html) {
+            ≔ tribe = capture.group(1).trim().to_string();
+            ⎇ !tribes.contains(tribe) && tribe.len() > 2 {
+                tribes.push(tribe);
+            }
+        }
+    }
+
+    ⤺ tribes;
+}
+
+/// Extracts US commissioner names
+rite extract_us_commissioners(html: String~) -> [String] {
+    ≔ vary commissioners: [String] = [];
+
+    // Look for "commissioner" or "commissioners" section
+    // Names often followed by titles
+
+    // This is complex - commissioners are usually listed after
+    // "In testimony whereof" or similar closing language
+    // For now, return empty and flag for manual review
+
+    ⤺ commissioners;
+}
+
+/// Extracts preamble text
+rite extract_preamble(html: String~) -> String? {
+    // Preamble is text between title and first article
+    ≔ article_start = regex("(?:ARTICLE|ART\\.?)\\s*(?:I|1)\\b").find(html);
+
+    ⎇ ≔ pos = article_start {
+        ≔ text = html[..pos.start()].to_string();
+        // Strip HTML tags
+        ≔ clean = strip_html_tags(text);
+        ⎇ clean.len() > 50 {
+            ⤺ ?clean;
+        }
+    }
+    ⤺ null;
+}
+
+/// Extracts article texts
+rite extract_articles(html: String~) -> [String] {
+    ≔ vary articles: [String] = [];
+
+    // Find all article markers and extract text between them
+    ≔ article_pattern = regex("(?:ARTICLE|ART\\.?)\\s*([IVXLC]+|\\d+)");
+    ≔ matches = article_pattern.find_all_with_positions(html);
+
+    ∀ i ∈ 0..matches.len() {
+        ≔ start = matches[i].end();
+        ≔ end = ⎇ i + 1 < matches.len() {
+            matches[i + 1].start()
+        } ⎉ {
+            // Find signatures section or end
+            regex("In (?:testimony|witness) whereof").find(html)
+                .map(|m| m.start())
+                .unwrap_or(html.len())
+        };
+
+        ≔ article_text = strip_html_tags(html[start..end].to_string());
+        articles.push(article_text.trim().to_string());
+    }
+
+    ⤺ articles;
+}
+
+/// Extracts signature names
+rite extract_signatures(html: String~) -> [String] {
+    ≔ vary signatures: [String] = [];
+
+    // Signatures usually appear after "In testimony whereof" or "In witness whereof"
+    ≔ witness_pos = regex("In (?:testimony|witness) whereof")
+        .find_case_insensitive(html);
+
+    ⎇ ≔ pos = witness_pos {
+        ≔ sig_section = html[pos.start()..].to_string();
+
+        // Look for name patterns (capitalized names, often with X marks)
+        ≔ name_pattern = regex("([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)+)");
+        ∀ capture ∈ name_pattern.find_all(sig_section) {
+            ≔ name = capture.group(1).to_string();
+            ⎇ name.len() > 3 && !signatures.contains(name) {
+                signatures.push(name);
+            }
+        }
+    }
+
+    ⤺ signatures;
+}
+
+/// Extracts Statutes at Large citation
+rite extract_stat_citation(html: String~) -> String? {
+    // Pattern: "X Stat. Y" or "X Stat., Y"
+    ⎇ ≔ m = regex("(\\d+)\\s*Stat\\.?,?\\s*(\\d+)").find(html) {
+        ⤺ ?format!("{} Stat. {}", m.group(1), m.group(2));
+    }
+    ⤺ null;
+}
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
+/// Extracts date from treaty title
+rite extract_date_from_title(title: String~) -> String? {
+    ≔ date_pattern = regex(
+        "((?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+\\d{4})"
+    );
+    ⎇ ≔ m = date_pattern.find(title) {
+        ⤺ ?m.group(1).to_string();
+    }
+    // Try year only
+    ⎇ ≔ m = regex("\\b(1[78]\\d{2})\\b").find(title) {
+        ⤺ ?m.group(1).to_string();
+    }
+    ⤺ null;
+}
+
+/// Extracts tribal names from treaty title
+rite extract_tribes_from_title(title: String~) -> [String] {
+    ≔ vary tribes: [String] = [];
+
+    // Common patterns in titles
+    ≔ patterns = [
+        "with(?:\\s+the)?\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)",
+        "([A-Z][a-z]+)\\s+(?:Nation|Tribe|Indians)",
+    ];
+
+    ∀ pattern ∈ patterns {
+        ∀ capture ∈ regex(pattern).find_all(title) {
+            ≔ tribe = capture.group(1).trim().to_string();
+            ⎇ !tribes.contains(tribe) && tribe.len() > 2 {
+                tribes.push(tribe);
+            }
+        }
+    }
+
+    ⤺ tribes;
+}
+
+/// Extracts page number from Kappler path
+rite extract_page_number(path: String~) -> i32! {
+    // Pattern: tre0001.htm -> 1
+    // TODO: Implement with regex_captures
+    ⤺ 0;
+}
+
+/// Parses a Kappler ID to extract page number
+rite parse_kappler_id(id: String!) -> i32! {
+    // ID format: "kappler-v2-pNNN"
+    // TODO: Implement proper parsing with regex_captures
+    ⤺ 0;
+}
+
+/// Decodes HTML entities
+rite html_decode(text: String~) -> String {
+    text.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+}
+
+/// Strips HTML tags from text
+rite strip_html_tags(html: String~) -> String {
+    // Remove all tags
+    ≔ no_tags = regex("<[^>]+>").replace_all(html, " ");
+    // Collapse whitespace
+    ≔ collapsed = regex("\\s+").replace_all(no_tags, " ");
+    // Decode entities
+    ⤺ html_decode(collapsed.trim().to_string()~);
+}
+
+// ============================================================================
+// Search
+// ============================================================================
+
+/// Searches Kappler treaties
+☉ async rite search(query: String!, config: ScrapeConfig!) -> ScrapeResult<[SearchHit]> {
+    // Kappler doesn't have a search endpoint, so we:
+    // 1. Fetch the index
+    // 2. Filter locally by query
+
+    ≔ index_result = fetch_treaty_index(config).await;
+
+    ≔ entries = ⌥ index_result {
+        ScrapeResult·Ok { data, .. } => data,
+        ScrapeResult·RateLimited { retry_after_ms } =>
+            ⤺ ScrapeResult·RateLimited { retry_after_ms },
+        ScrapeResult·NetworkError { message } =>
+            ⤺ ScrapeResult·NetworkError { message },
+        ScrapeResult·ParseError { message, raw } =>
+            ⤺ ScrapeResult·ParseError { message, raw },
+        ScrapeResult·NotFound =>
+            ⤺ ScrapeResult·Ok { data: [], cached: nay },
+    };
+
+    // Simple case-insensitive search
+    ≔ query_lower = query.to_lowercase();
+    ≔ vary hits: [SearchHit] = [];
+
+    ∀ entry ∈ entries {
+        ≔ title_lower = entry.title.to_lowercase();
+        ≔ tribes_text = entry.tribes.join(" ").to_lowercase();
+
+        ⎇ title_lower.contains(query_lower) || tribes_text.contains(query_lower) {
+            // Calculate simple relevance score
+            ≔ score = ⎇ title_lower.contains(query_lower) { 0.8 } ⎉ { 0.5 };
+
+            hits.push(SearchHit {
+                entity_type: "treaty".to_string(),
+                id: entry.id,
+                title: entry.title,
+                snippet: ?format!("Treaty with {}", entry.tribes.join(", ")),
+                url: entry.url,
+                score: score,
+            });
+        }
+    }
+
+    // Sort by score descending
+    hits.sort_by(|a, b| b.score.partial_cmp(a.score).unwrap_or(Ordering·Equal));
+
+    ⤺ ScrapeResult·Ok { data: hits, cached: nay };
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+// TODO: Re-add tests once Sigil test module syntax is confirmed

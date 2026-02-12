@@ -1,0 +1,83 @@
+//! Server Module
+//!
+//! HTTP server configuration and utilities.
+
+invoke sigil_http·{ServerConfig, Response};
+invoke serde_json·json;
+
+// ============================================================================
+// Server Configuration Helpers
+// ============================================================================
+
+/// Default server configuration
+☉ rite default_server_config(host: &str, port: u16) -> ServerConfig {
+    ServerConfig {
+        host: host.to_string(),
+        port,
+        keep_alive: yea,
+        request_timeout_ms: 30000,
+        max_connections: 1024,
+        worker_threads: num_cpus::get(),
+    }
+}
+
+// ============================================================================
+// Response Helpers
+// ============================================================================
+
+/// Creates a JSON response with proper content type
+☉ rite json_response<T: serde::Serialize>(data: T) -> Response {
+    Response::json(data)
+}
+
+/// Creates a successful empty response
+☉ rite ok_response() -> Response {
+    Response::json(json!({ "success": true }))
+}
+
+/// Creates an error response
+☉ rite error_response(status: u16, message: &str) -> Response {
+    Response::json(json!({
+        "error": message
+    })).status(status)
+}
+
+/// Creates a not found response
+☉ rite not_found_response(entity: &str) -> Response {
+    Response::json(json!({
+        "error": format!("{} not found", entity)
+    })).status(404)
+}
+
+/// Creates a validation error response
+☉ rite validation_error_response(errors: Vec<String>) -> Response {
+    Response::json(json!({
+        "error": "Validation failed",
+        "details": errors
+    })).status(422)
+}
+
+// ============================================================================
+// Health Types
+// ============================================================================
+
+#[derive(serde::Serialize)]
+☉ sigil HealthStatus {
+    status: String!,
+    database: String!,
+    version: String!,
+    uptime_seconds: u64!,
+}
+
+// ============================================================================
+// Startup Banner
+// ============================================================================
+
+☉ rite print_banner() {
+    println!("
+╦ ╦┬┌┐┌┌┬┐┬ ┬┌─┐┬  ┬┌─┌─┐┬─┐
+║║║││││ ││││├─┤│  ├┴┐├┤ ├┬┘
+╚╩╝┴┘└┘─┴┘└┴┘┴ ┴┴─┘┴ ┴└─┘┴└─
+Native Treaty Mapping Initiative
+    ");
+}

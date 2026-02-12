@@ -1,0 +1,349 @@
+//! Core types for Windwalker data sourcing pipeline
+//!
+//! All scraped data carries evidentiality markers:
+//!   ! = verified/computed (we calculated or cross-referenced)
+//!   ~ = reported/external (scraped from authoritative source)
+//!   ? = uncertain/optional (may not exist)
+//!   ‽ = paradox (conflicting sources)
+
+// ============================================================================
+// Source Identification
+// ============================================================================
+
+/// Unique identifier for a data source
+☉ sigil SourceId {
+    value: String!,
+}
+
+/// Types of authoritative sources
+☉ ᛈ SourceType {
+    /// Charles J. Kappler's Indian Affairs: Laws and Treaties
+    Kappler,
+    /// National Archives and Records Administration
+    NARA,
+    /// Bureau of Indian Affairs
+    BIA,
+    /// Library of Congress
+    LOC,
+    /// Federal Register
+    FederalRegister,
+    /// US Statutes at Large
+    StatutesAtLarge,
+    /// Official tribal nation website
+    TribalOfficial,
+    /// State historical society
+    StateArchive,
+    /// Academic source with primary citations
+    Academic,
+}
+
+/// Metadata about a data source
+☉ sigil DataSource {
+    id: SourceId!,
+    source_type: SourceType!,
+    name: String!,
+    base_url: String!,
+
+    /// When we last successfully scraped this source
+    last_scraped: DateTime?,
+
+    /// How reliable is this source? (0.0 - 1.0)
+    reliability: f64!,
+}
+
+// ============================================================================
+// Provenance Tracking
+// ============================================================================
+
+/// A single step in the provenance chain
+☉ sigil ProvenanceStep {
+    /// Which source provided this data
+    source: DataSource!,
+
+    /// The raw value as extracted
+    raw_value: String~,
+
+    /// When we extracted it
+    extracted_at: DateTime!,
+
+    /// Version of the extractor used
+    extractor_version: String!,
+
+    /// URL where this specific data was found
+    source_url: String!,
+}
+
+/// Full provenance chain for a data point
+☉ sigil ProvenanceChain {
+    /// All sources that contributed to this value
+    steps: [ProvenanceStep]!,
+
+    /// The final resolved value
+    current_value: String~,
+
+    /// Our confidence in this value
+    confidence: Confidence!,
+}
+
+/// Confidence levels for data
+☉ ᛈ Confidence {
+    /// Multiple corroborating sources agree
+    Verified,
+    /// Single authoritative source
+    Authoritative,
+    /// Reasonable confidence, minor uncertainties
+    Probable,
+    /// Limited evidence
+    Uncertain,
+    /// Sources actively disagree
+    Disputed,
+    /// Inferred from indirect evidence
+    Reconstructed,
+}
+
+// ============================================================================
+// Raw Scraped Data (before normalization)
+// ============================================================================
+
+/// Raw treaty data as scraped from Kappler
+☉ sigil RawTreaty {
+    /// Source tracking
+    source: DataSource!,
+    source_url: String!,
+    scraped_at: DateTime!,
+
+    /// Kappler-specific identifiers
+    kappler_volume: i32?,
+    kappler_page: i32?,
+
+    /// Basic info
+    title: String~,
+    date_signed_text: String?,
+    date_ratified_text: String?,
+    date_proclaimed_text: String?,
+
+    /// Parties
+    tribal_parties_text: [String]~,
+    us_commissioners_text: [String]~,
+
+    /// Content
+    preamble: String?,
+    articles_text: [String]~,
+    signatures_text: [String]~,
+
+    /// Legal citations
+    statutes_at_large_citation: String?,
+
+    /// Raw HTML for reprocessing if needed
+    raw_html: String!,
+}
+
+/// Raw tribe data as scraped from BIA
+☉ sigil RawTribe {
+    /// Source tracking
+    source: DataSource!,
+    source_url: String!,
+    scraped_at: DateTime!,
+
+    /// BIA identifiers
+    bia_id: String?,
+
+    /// Basic info
+    name: String~,
+    alternate_names: [String]~,
+
+    /// Location
+    region: String?,
+    state: String?,
+    headquarters_address: String?,
+
+    /// Contact
+    leader_name: String?,
+    leader_title: String?,
+    phone: String?,
+    website: String?,
+
+    /// Recognition
+    federally_recognized: bool~,
+    recognition_date: String?,
+}
+
+/// NARA archive record
+☉ sigil RawArchiveRecord {
+    /// Source tracking
+    source: DataSource!,
+    source_url: String!,
+    scraped_at: DateTime!,
+
+    /// NARA identifiers
+    nara_id: String!,
+    record_group: String?,
+    series: String?,
+
+    /// Basic info
+    title: String~,
+    description: String?,
+
+    /// Dates
+    date_range_text: String?,
+
+    /// Digital objects (images, PDFs)
+    digital_object_urls: [String]~,
+}
+
+// ============================================================================
+// Validation Results
+// ============================================================================
+
+/// Result of validating a piece of data
+☉ sigil ValidationResult {
+    is_valid: bool!,
+    errors: [ValidationError]!,
+    warnings: [ValidationWarning]!,
+}
+
+☉ sigil ValidationError {
+    field: String!,
+    message: String!,
+    error_type: ValidationErrorType!,
+}
+
+☉ ᛈ ValidationErrorType {
+    MissingRequired,
+    InvalidFormat,
+    OutOfRange,
+    InvalidReference,
+    FailedCrossReference,
+}
+
+☉ sigil ValidationWarning {
+    field: String!,
+    message: String!,
+    warning_type: ValidationWarningType!,
+}
+
+☉ ᛈ ValidationWarningType {
+    MissingRecommended,
+    PossibleTypo,
+    UnusualValue,
+    UnknownReference,
+    LowConfidence,
+}
+
+// ============================================================================
+// Conflict Detection
+// ============================================================================
+
+/// When sources disagree
+☉ sigil ConflictRecord {
+    /// What entity has conflicting data
+    entity_type: String!,
+    entity_id: String!,
+
+    /// Which field conflicts
+    field: String!,
+
+    /// The different versions from different sources
+    versions: [ConflictVersion]!,
+
+    /// Has this been resolved?
+    resolution: ConflictResolution?,
+}
+
+☉ sigil ConflictVersion {
+    value: String~,
+    source: DataSource!,
+    confidence: Confidence!,
+}
+
+☉ sigil ConflictResolution {
+    resolved_value: String~,
+    resolution_type: ResolutionType!,
+    rationale: String!,
+    resolved_by: String?,
+    resolved_at: DateTime!,
+}
+
+☉ ᛈ ResolutionType {
+    /// One source deemed more authoritative
+    PreferredSource,
+    /// Combined from multiple sources
+    Synthesis,
+    /// Left as disputed, show all versions
+    Unresolved,
+    /// Deferred to tribal nation's determination
+    TribalDetermination,
+    /// Requires human expert review
+    PendingReview,
+}
+
+// ============================================================================
+// Review Queue
+// ============================================================================
+
+/// Item requiring human review
+☉ sigil ReviewItem {
+    id: String!,
+
+    /// What type of entity needs review
+    entity_type: String!,
+
+    /// The raw data to review
+    raw_data: String~,
+
+    /// Why does this need review?
+    trigger: ReviewTrigger!,
+
+    /// How urgent is this?
+    priority: Priority!,
+
+    /// Sources already consulted
+    sources_consulted: [DataSource]!,
+
+    /// Any detected conflicts
+    conflicts: [ConflictRecord]?,
+
+    /// Current status
+    status: ReviewStatus!,
+
+    /// Assignment
+    assigned_to: String?,
+
+    /// Resolution
+    resolution: String?,
+    resolution_notes: String?,
+    resolved_by: String?,
+    resolved_at: DateTime?,
+}
+
+☉ ᛈ ReviewTrigger {
+    /// New entity discovered
+    NewEntity,
+    /// Sources disagree
+    SourceConflict,
+    /// Low confidence match
+    LowConfidenceMatch,
+    /// Unknown name needs research
+    UnknownName,
+    /// Geographic data is ambiguous
+    GeographicAmbiguity,
+    /// Missing required field
+    MissingRequired,
+    /// Validation failed
+    ValidationFailed,
+}
+
+☉ ᛈ Priority {
+    Critical,
+    High,
+    Medium,
+    Low,
+}
+
+☉ ᛈ ReviewStatus {
+    Pending,
+    InProgress,
+    NeedsMoreResearch,
+    Resolved,
+    Deferred,
+}

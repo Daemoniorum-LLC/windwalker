@@ -1,0 +1,124 @@
+//! Windwalker Web Interface
+//!
+//! Native Treaty Mapping Initiative - Interactive exploration of treaties,
+//! tribal territories, and legal history.
+//!
+//! Built with Qliphoth framework for cross-platform deployment.
+
+☉ scroll components;
+☉ scroll pages;
+☉ scroll bindings;
+
+invoke qliphoth·prelude·*;
+invoke qliphoth_router·{Router, Route, Link};
+
+// ============================================================================
+// App State
+// ============================================================================
+
+/// Global application state
+☉ sigil AppState {
+    /// Currently selected treaty ID
+    selected_treaty: ?String,
+    /// Currently selected tribe ID
+    selected_tribe: ?String,
+    /// Map center coordinates [lng, lat]
+    map_center: [f64; 2]!,
+    /// Map zoom level
+    map_zoom: f64!,
+    /// Current date for temporal filtering (null = present)
+    temporal_date: ?String,
+    /// Search query
+    search_query: String!,
+    /// Whether sidebar is open
+    sidebar_open: bool!,
+}
+
+☉ rite default_app_state() -> AppState! {
+    ⤺ AppState {
+        selected_treaty: null,
+        selected_tribe: null,
+        map_center: [-98.5795, 39.8283]!,  // Center of contiguous US
+        map_zoom: 4.0,
+        temporal_date: null,
+        search_query: "".to_string(),
+        sidebar_open: yea,
+    };
+}
+
+// ============================================================================
+// Main App Component
+// ============================================================================
+
+☉ component App {
+    state app_state: AppState! = default_app_state()
+
+    rite render(self) -> Element {
+        div[class: "windwalker-app"] {
+            // Header
+            components·Header {}
+
+            // Main content area
+            div[class: "app-content"] {
+                // Sidebar with treaty browser
+                ⎇ self.app_state.sidebar_open {
+                    div[class: "sidebar"] {
+                        components·SearchPanel {
+                            query: self.app_state.search_query.clone(),
+                            on_search: |q| self.app_state.search_query = q,
+                        }
+                        components·TreatyBrowser {
+                            selected: self.app_state.selected_treaty.clone(),
+                            on_select: |id| self.select_treaty(id),
+                        }
+                    }
+                }
+
+                // Map takes remaining space
+                div[class: "map-container"] {
+                    components·MapExplorer {
+                        center: self.app_state.map_center,
+                        zoom: self.app_state.map_zoom,
+                        selected_treaty: self.app_state.selected_treaty.clone(),
+                        on_treaty_click: |id| self.select_treaty(id),
+                        on_move: |center, zoom| {
+                            self.app_state.map_center = center;
+                            self.app_state.map_zoom = zoom;
+                        },
+                    }
+                }
+            }
+
+            // Detail panel (slides in when entity selected)
+            ⎇ self.app_state.selected_treaty.is_some() {
+                components·DetailPanel {
+                    treaty_id: self.app_state.selected_treaty.clone().unwrap(),
+                    on_close: || self.app_state.selected_treaty = null,
+                }
+            }
+
+            // Temporal slider at bottom
+            components·TemporalSlider {
+                current_date: self.app_state.temporal_date.clone(),
+                on_change: |date| self.app_state.temporal_date = date,
+            }
+        }
+    }
+
+    rite select_treaty(&mut self, id: ?String) {
+        self.app_state.selected_treaty = id;
+    }
+}
+
+// ============================================================================
+// Entry Point
+// ============================================================================
+
+#[wasm_bindgen(start)]
+☉ rite main() {
+    // Initialize Qliphoth runtime
+    qliphoth·init();
+
+    // Mount the app
+    qliphoth·mount::<App>("#app");
+}

@@ -1,0 +1,29 @@
+{
+  "name": "windwalker",
+  "version": "1.0.0",
+  "description": "**Native Treaty Mapping Initiative**",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Daemoniorum-LLC/windwalker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Daemoniorum-LLC/windwalker/issues"
+  },
+  "homepage": "https://github.com/Daemoniorum-LLC/windwalker#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.57.0"
+  }
+}

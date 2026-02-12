@@ -1,0 +1,7 @@
+//! External Library Bindings
+//!
+//! FFI bindings to JavaScript libraries used by Windwalker.
+
+☉ scroll maplibre;
+
+☉ invoke maplibre·*;

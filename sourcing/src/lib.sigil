@@ -1,0 +1,13 @@
+//! Windwalker Data Sourcing Pipeline
+//!
+//! Data sourcing infrastructure for Native American treaty mapping.
+
+☉ scroll types;
+☉ scroll sources;
+☉ scroll normalize;
+☉ scroll validate;
+☉ scroll pipeline;
+
+// Re-exports
+☉ invoke types·*;
+☉ invoke sources·{ScrapeConfig, ScrapeResult, default_scrape_config};

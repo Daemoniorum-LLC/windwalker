@@ -1,0 +1,280 @@
+//! Search API Endpoints
+//!
+//! Full-text search across treaties, tribes, and territories.
+
+invoke sigil_http·{Request, Response};
+invoke serde_json·json;
+invoke types·*;
+
+// ============================================================================
+// Full-Text Search
+// ============================================================================
+
+/// GET /api/v1/search
+///
+/// Query parameters:
+/// - q: Search query (required)
+/// - types: Entity types to search (treaty, tribe, territory, law) - comma separated
+/// - limit: Maximum results (default 20)
+/// - offset: Pagination offset
+☉ async rite search(req: Request, state: &AppState) -> Response {
+    ≔ query_params = req.query::<SearchQuery>().unwrap_or_default();
+
+    ≔ search_query = ⌥ &query_params.q {
+        Some(q) ⎇ !q.is_empty() => q,
+        _ => {
+            ⤺ Response::json(json!({
+                "error": "Missing required parameter: q"
+            })).status(400);
+        },
+    };
+
+    ≔ limit = query_params.limit.unwrap_or(20).min(100);
+    ≔ offset = query_params.offset.unwrap_or(0);
+
+    // Parse types filter
+    ≔ types: Vec<&str> = query_params.types
+        .as_ref()
+        .map(|t| t.split(',').collect())
+        .unwrap_or_else(|| vec!["treaty", "tribe"]);
+
+    ≔ vary results: Vec<SearchResult> = vec![];
+
+    // Search treaties
+    ⎇ types.contains(&"treaty") {
+        ≔ treaty_results = search_treaties(state, search_query, limit / 2).await;
+        results.extend(treaty_results);
+    }
+
+    // Search tribes
+    ⎇ types.contains(&"tribe") {
+        ≔ tribe_results = search_tribes(state, search_query, limit / 2).await;
+        results.extend(tribe_results);
+    }
+
+    // Sort by score descending
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Apply limit
+    results.truncate(limit as usize);
+
+    Response::json(json!({
+        "query": search_query,
+        "results": results,
+        "total": results.len()
+    }))
+}
+
+// ============================================================================
+// Suggest (Autocomplete)
+// ============================================================================
+
+/// GET /api/v1/suggest
+///
+/// Query parameters:
+/// - q: Partial search query (required, min 2 chars)
+/// - types: Entity types (default: all)
+/// - limit: Maximum suggestions (default 10)
+☉ async rite suggest(req: Request, state: &AppState) -> Response {
+    ≔ query_params = req.query::<SuggestQuery>().unwrap_or_default();
+
+    ≔ search_query = ⌥ &query_params.q {
+        Some(q) ⎇ q.len() >= 2 => q,
+        _ => {
+            ⤺ Response::json(json!({
+                "suggestions": []
+            }));
+        },
+    };
+
+    ≔ limit = query_params.limit.unwrap_or(10).min(20);
+
+    // Simple prefix matching for autocomplete
+    ≔ vary suggestions: Vec<Suggestion> = vec![];
+
+    // Treaty suggestions
+    ≔ treaty_sql = "
+        SELECT id, title, 'treaty' as entity_type
+        FROM raw_treaties
+        WHERE title ILIKE $1
+        ORDER BY date_signed DESC
+        LIMIT $2
+    ";
+
+    ⎇ ≔ rows = state.db.query(treaty_sql, &[
+        &format!("{}%", search_query),
+        &(limit as i64)
+    ]).await.ok() {
+        ∀ row ∈ rows {
+            suggestions.push(Suggestion {
+                entity_type: "treaty".to_string(),
+                id: row.get("id"),
+                text: row.get("title"),
+                highlight: null,
+            });
+        }
+    }
+
+    // Tribe suggestions
+    ≔ tribe_sql = "
+        SELECT id, name, 'tribe' as entity_type
+        FROM raw_tribes
+        WHERE name ILIKE $1 OR alternate_names::text ILIKE $1
+        ORDER BY name ASC
+        LIMIT $2
+    ";
+
+    ⎇ ≔ rows = state.db.query(tribe_sql, &[
+        &format!("{}%", search_query),
+        &(limit as i64)
+    ]).await.ok() {
+        ∀ row ∈ rows {
+            suggestions.push(Suggestion {
+                entity_type: "tribe".to_string(),
+                id: row.get("id"),
+                text: row.get("name"),
+                highlight: null,
+            });
+        }
+    }
+
+    suggestions.truncate(limit as usize);
+
+    Response::json(json!({
+        "query": search_query,
+        "suggestions": suggestions
+    }))
+}
+
+// ============================================================================
+// Search Helpers
+// ============================================================================
+
+async rite search_treaties(state: &AppState, query: &str, limit: u32) -> Vec<SearchResult> {
+    ≔ sql = "
+        SELECT
+            id,
+            title,
+            LEFT(preamble, 200) as snippet,
+            date_signed,
+            ts_rank(
+                to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(preamble, '')),
+                plainto_tsquery('english', $1)
+            ) as rank
+        FROM raw_treaties
+        WHERE to_tsvector('english', COALESCE(title, '') || ' ' || COALESCE(preamble, ''))
+              @@ plainto_tsquery('english', $1)
+           OR title ILIKE $2
+        ORDER BY rank DESC
+        LIMIT $3
+    ";
+
+    ⌥ state.db.query(sql, &[
+        &query,
+        &format!("%{}%", query),
+        &(limit as i64)
+    ]).await {
+        Result·Ok(rows) => {
+            rows.iter().map(|row| {
+                SearchResult {
+                    entity_type: "treaty".to_string(),
+                    id: row.get("id"),
+                    title: row.get("title"),
+                    snippet: row.get("snippet"),
+                    url: format!("/treaties/{}", row.get::<String>("id")),
+                    score: row.get::<f32>("rank") as f64,
+                }
+            }).collect()
+        },
+        Result·Err(_) => vec![],
+    }
+}
+
+async rite search_tribes(state: &AppState, query: &str, limit: u32) -> Vec<SearchResult> {
+    ≔ sql = "
+        SELECT
+            id,
+            name,
+            state,
+            region,
+            ts_rank(
+                to_tsvector('english', COALESCE(name, '') || ' ' || COALESCE(alternate_names::text, '')),
+                plainto_tsquery('english', $1)
+            ) as rank
+        FROM raw_tribes
+        WHERE to_tsvector('english', COALESCE(name, '') || ' ' || COALESCE(alternate_names::text, ''))
+              @@ plainto_tsquery('english', $1)
+           OR name ILIKE $2
+           OR alternate_names::text ILIKE $2
+        ORDER BY rank DESC
+        LIMIT $3
+    ";
+
+    ⌥ state.db.query(sql, &[
+        &query,
+        &format!("%{}%", query),
+        &(limit as i64)
+    ]).await {
+        Result·Ok(rows) => {
+            rows.iter().map(|row| {
+                ≔ snippet = ⌥ (row.get::<Option<String>>("state"), row.get::<Option<String>>("region")) {
+                    (Some(s), Some(r)) => ?format!("{}, {}", s, r),
+                    (Some(s), None) => ?s,
+                    (None, Some(r)) => ?r,
+                    _ => null,
+                };
+
+                SearchResult {
+                    entity_type: "tribe".to_string(),
+                    id: row.get("id"),
+                    title: row.get("name"),
+                    snippet,
+                    url: format!("/tribes/{}", row.get::<String>("id")),
+                    score: row.get::<f32>("rank") as f64,
+                }
+            }).collect()
+        },
+        Result·Err(_) => vec![],
+    }
+}
+
+// ============================================================================
+// Query Types
+// ============================================================================
+
+#[derive(Default, Deserialize)]
+☉ sigil SearchQuery {
+    q: ?String,
+    types: ?String,
+    limit: ?u32,
+    offset: ?u32,
+}
+
+#[derive(Default, Deserialize)]
+☉ sigil SuggestQuery {
+    q: ?String,
+    types: ?String,
+    limit: ?u32,
+}
+
+// ============================================================================
+// Response Types
+// ============================================================================
+
+#[derive(Serialize)]
+☉ sigil SearchResult {
+    entity_type: String!,
+    id: String!,
+    title: String~,
+    snippet: ?String,
+    url: String!,
+    score: f64!,
+}
+
+#[derive(Serialize)]
+☉ sigil Suggestion {
+    entity_type: String!,
+    id: String!,
+    text: String~,
+    highlight: ?String,
+}

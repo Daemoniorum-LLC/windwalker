@@ -1,0 +1,221 @@
+//! API Response Types
+//!
+//! Shared types used across API endpoints.
+
+invoke serde·{Serialize, Deserialize};
+
+// ============================================================================
+// Treaty Types
+// ============================================================================
+
+#[derive(Serialize)]
+☉ sigil TreatySummary {
+    id: String!,
+    name: String~,
+    signed_date: ?String,
+    tribes: Vec<TribeRef>~,
+    status: String!,
+    certainty: String!,
+    kappler_ref: ?String,
+}
+
+#[derive(Serialize)]
+☉ sigil TreatyDetail {
+    id: String!,
+    name: String~,
+    alternate_names: Vec<String>~,
+
+    signed_date: ?String,
+    signed_date_text: ?String,
+    ratified_date: ?String,
+    proclaimed_date: ?String,
+
+    tribes: Vec<TribeRef>~,
+    us_commissioners: Vec<String>~,
+    tribal_signatories: Vec<SignatoryInfo>~,
+
+    status: String!,
+    violations: Vec<ViolationInfo>~,
+    affecting_laws: Vec<LawRef>~,
+
+    preamble: ?String,
+    articles: Vec<ArticleInfo>~,
+
+    ceded_territory_acres: ?f64,
+    reserved_territory_acres: ?f64,
+    boundary_certainty: String!,
+
+    sources: Vec<SourceInfo>~,
+    kappler_citation: ?String,
+    statutes_at_large: ?String,
+}
+
+#[derive(Serialize, Deserialize)]
+☉ sigil SignatoryInfo {
+    name: String~,
+    title: ?String,
+    tribe: ?String,
+    mark_type: ?String,
+}
+
+#[derive(Serialize, Deserialize)]
+☉ sigil ArticleInfo {
+    number: u32!,
+    title: ?String,
+    text: String~,
+}
+
+#[derive(Serialize)]
+☉ sigil ViolationInfo {
+    description: String~,
+    date: ?String,
+    violating_action: String~,
+}
+
+// ============================================================================
+// Tribe Types
+// ============================================================================
+
+#[derive(Serialize, Deserialize, Clone)]
+☉ sigil TribeRef {
+    id: String!,
+    name: String~,
+}
+
+#[derive(Serialize)]
+☉ sigil TribeSummary {
+    id: String!,
+    name: String~,
+    alternate_names: Vec<String>~,
+    region: ?String,
+    state: ?String,
+    federally_recognized: ?bool,
+    treaty_count: i64!,
+    certainty: ?String,
+}
+
+#[derive(Serialize)]
+☉ sigil TribeDetail {
+    id: String!,
+    name: String~,
+    alternate_names: Vec<String>~,
+    bia_id: ?String,
+
+    region: ?String,
+    state: ?String,
+    headquarters_address: ?String,
+    headquarters_location: ?serde_json::Value,
+
+    leader_name: ?String,
+    leader_title: ?String,
+    phone: ?String,
+    website: ?String,
+
+    federally_recognized: ?bool,
+    recognition_date: ?String,
+
+    certainty: ?String,
+    sources: Vec<SourceInfo>~,
+}
+
+// ============================================================================
+// Law Types
+// ============================================================================
+
+#[derive(Serialize)]
+☉ sigil LawRef {
+    id: String!,
+    name: String~,
+    enacted_date: ?String,
+}
+
+// ============================================================================
+// Source Types
+// ============================================================================
+
+#[derive(Serialize)]
+☉ sigil SourceInfo {
+    name: String!,
+    source_type: String!,
+    url: ?String,
+    reliability: f64!,
+    accessed_date: ?String,
+}
+
+// ============================================================================
+// Evidentiality
+// ============================================================================
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+☉ ᛈ Certainty {
+    Verified,
+    Probable,
+    Uncertain,
+    Disputed,
+    Reconstructed,
+}
+
+impl Certainty {
+    ☉ rite to_string(&self) -> String {
+        ⌥ self {
+            Certainty·Verified => "Verified".to_string(),
+            Certainty·Probable => "Probable".to_string(),
+            Certainty·Uncertain => "Uncertain".to_string(),
+            Certainty·Disputed => "Disputed".to_string(),
+            Certainty·Reconstructed => "Reconstructed".to_string(),
+        }
+    }
+
+    ☉ rite marker(&self) -> &'static str {
+        ⌥ self {
+            Certainty·Verified => "!",
+            Certainty·Probable => "~",
+            Certainty·Uncertain => "?",
+            Certainty·Disputed => "‽",
+            Certainty·Reconstructed => "~?",
+        }
+    }
+}
+
+// ============================================================================
+// Pagination
+// ============================================================================
+
+#[derive(Serialize)]
+☉ sigil PaginatedResponse<T> {
+    data: Vec<T>!,
+    total: i64!,
+    limit: u32!,
+    offset: u32!,
+}
+
+// ============================================================================
+// Error Response
+// ============================================================================
+
+#[derive(Serialize)]
+☉ sigil ErrorResponse {
+    error: String!,
+    details: ?String,
+    code: ?String,
+}
+
+impl ErrorResponse {
+    ☉ rite new(error: impl Into<String>) -> Self {
+        ErrorResponse {
+            error: error.into(),
+            details: null,
+            code: null,
+        }
+    }
+
+    ☉ rite with_details(mut self, details: impl Into<String>) -> Self {
+        self.details = ?details.into();
+        self
+    }
+
+    ☉ rite with_code(mut self, code: impl Into<String>) -> Self {
+        self.code = ?code.into();
+        self
+    }
+}

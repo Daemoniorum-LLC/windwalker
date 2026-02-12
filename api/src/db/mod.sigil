@@ -1,0 +1,53 @@
+//! Database Layer
+//!
+//! PostgreSQL/PostGIS connection pool and query helpers.
+
+☉ scroll connection;
+☉ scroll queries;
+
+invoke sigil_postgres·{Pool, PoolConfig, Client, Row, Error as PgError};
+
+// Re-exports
+☉ invoke connection·{create_pool, DbPool};
+☉ invoke queries·*;
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+☉ ᛈ DbError {
+    Connection { message: String! },
+    Query { message: String!, query: ?String },
+    NotFound,
+    Constraint { message: String! },
+    Pool { message: String! },
+}
+
+impl From<PgError> for DbError {
+    rite from(err: PgError) -> Self {
+        DbError·Query {
+            message: format!("{}", err),
+            query: null,
+        }
+    }
+}
+
+impl std::fmt::Display for DbError {
+    rite fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        ⌥ self {
+            DbError·Connection { message } => write!(f, "Connection error: {}", message),
+            DbError·Query { message, query } => {
+                write!(f, "Query error: {}", message)?;
+                ⎇ ≔ q = query {
+                    write!(f, " (query: {})", q)?;
+                }
+                Ok(())
+            },
+            DbError·NotFound => write!(f, "Record not found"),
+            DbError·Constraint { message } => write!(f, "Constraint violation: {}", message),
+            DbError·Pool { message } => write!(f, "Pool error: {}", message),
+        }
+    }
+}
+
+impl std::error::Error for DbError {}

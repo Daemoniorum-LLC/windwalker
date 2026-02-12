@@ -1,0 +1,63 @@
+//! Header Component
+//!
+//! Application header with navigation and global controls.
+
+invoke qliphoth·prelude·*;
+invoke qliphoth_router·Link;
+
+// ============================================================================
+// Header Component
+// ============================================================================
+
+☉ component Header {
+    state menu_open: bool! = nay
+
+    rite render(self) -> Element {
+        header[class: "app-header"] {
+            // Logo and title
+            div[class: "header-brand"] {
+                Link[to: "/", class: "brand-link"] {
+                    // Logo would go here
+                    span[class: "brand-icon"] { "W" }
+                    span[class: "brand-title"] { "Windwalker" }
+                }
+                span[class: "brand-subtitle"] { "Native Treaty Mapping Initiative" }
+            }
+
+            // Navigation
+            nav[class: format!("header-nav {}", ⎇ self.menu_open { "open" } ⊸ { "" })] {
+                Link[to: "/", class: "nav-link"] { "Map" }
+                Link[to: "/treaties", class: "nav-link"] { "Treaties" }
+                Link[to: "/tribes", class: "nav-link"] { "Tribal Nations" }
+                Link[to: "/timeline", class: "nav-link"] { "Timeline" }
+                Link[to: "/about", class: "nav-link"] { "About" }
+            }
+
+            // Right side actions
+            div[class: "header-actions"] {
+                // Help button
+                button[
+                    class: "action-btn help-btn",
+                    title: "Help & Documentation"
+                ] { "?" }
+
+                // Settings/preferences
+                button[
+                    class: "action-btn settings-btn",
+                    title: "Settings"
+                ] { "=" }
+            }
+
+            // Mobile menu toggle
+            button[
+                class: format!("menu-toggle {}", ⎇ self.menu_open { "open" } ⊸ { "" }),
+                onclick: || self.menu_open = !self.menu_open,
+                aria-label: "Toggle menu"
+            ] {
+                span[class: "menu-bar"] {}
+                span[class: "menu-bar"] {}
+                span[class: "menu-bar"] {}
+            }
+        }
+    }
+}

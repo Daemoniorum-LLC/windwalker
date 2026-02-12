@@ -1,0 +1,232 @@
+//! Vector Tile API Endpoint
+//!
+//! Serves Mapbox Vector Tiles (MVT) for map rendering.
+//!
+//! Tile format follows the MVT spec:
+//! https://github.com/mapbox/vector-tile-spec
+
+invoke sigil_http·{Request, Response};
+invoke mvt·{Tile, Layer, Feature, GeomType};
+
+// ============================================================================
+// Tile Constants
+// ============================================================================
+
+≔ TILE_EXTENT: u32! = 4096;
+≔ TILE_BUFFER: u32! = 64;
+≔ MAX_ZOOM: u8! = 14;
+≔ MIN_ZOOM: u8! = 0;
+
+// Cache control headers
+≔ CACHE_MAX_AGE: u32! = 86400;  // 24 hours
+
+// ============================================================================
+// Get Tile
+// ============================================================================
+
+/// GET /tiles/:layer/:z/:x/:y.mvt
+///
+/// Serves vector tiles for map rendering.
+///
+/// Layers:
+/// - treaties: Treaty territory polygons
+/// - tribes: Tribal nation territories
+/// - boundaries: Historical boundary lines
+☉ async rite get_tile(req: Request, state: &AppState) -> Response {
+    // Parse tile coordinates
+    ≔ layer = req.param("layer");
+    ≔ z = ⌥ req.param("z").parse::<u8>() {
+        Result·Ok(v) => v,
+        Result·Err(_) => {
+            ⤺ Response::text("Invalid zoom level").status(400);
+        },
+    };
+    ≔ x = ⌥ req.param("x").parse::<u32>() {
+        Result·Ok(v) => v,
+        Result·Err(_) => {
+            ⤺ Response::text("Invalid x coordinate").status(400);
+        },
+    };
+    ≔ y_str = req.param("y");
+    ≔ y = ⌥ y_str.strip_suffix(".mvt").unwrap_or(&y_str).parse::<u32>() {
+        Result·Ok(v) => v,
+        Result·Err(_) => {
+            ⤺ Response::text("Invalid y coordinate").status(400);
+        },
+    };
+
+    // Validate zoom
+    ⎇ z > MAX_ZOOM {
+        ⤺ Response::text("Zoom level too high").status(400);
+    }
+
+    // Validate tile coordinates
+    ≔ max_tile = 1u32 << z;
+    ⎇ x >= max_tile || y >= max_tile {
+        ⤺ Response::text("Tile coordinates out of range").status(400);
+    }
+
+    // Generate tile based on layer
+    ≔ tile_data = ⌥ layer.as_str() {
+        "treaties" => generate_treaty_tile(state, z, x, y).await,
+        "tribes" => generate_tribe_tile(state, z, x, y).await,
+        "boundaries" => generate_boundary_tile(state, z, x, y).await,
+        _ => {
+            ⤺ Response::text("Unknown layer").status(404);
+        },
+    };
+
+    ⌥ tile_data {
+        Result·Ok(data) => {
+            Response::bytes(data)
+                .header("Content-Type", "application/vnd.mapbox-vector-tile")
+                .header("Content-Encoding", "gzip")
+                .header("Cache-Control", format!("public, max-age={}", CACHE_MAX_AGE))
+                .header("Access-Control-Allow-Origin", "*")
+        },
+        Result·Err(e) => {
+            eprintln!("Tile generation error: {}", e);
+            // Return empty tile on error
+            Response::bytes(empty_tile())
+                .header("Content-Type", "application/vnd.mapbox-vector-tile")
+        },
+    }
+}
+
+// ============================================================================
+// Tile Generation
+// ============================================================================
+
+async rite generate_treaty_tile(state: &AppState, z: u8, x: u32, y: u32) -> Result<Vec<u8>, String> {
+    // Calculate tile bounds
+    ≔ bounds = tile_to_bbox(z, x, y);
+
+    // Determine simplification based on zoom
+    ≔ simplify_tolerance = simplify_for_zoom(z);
+
+    // Query geometries that intersect this tile
+    ≔ sql = format!("
+        SELECT
+            t.id,
+            t.title as name,
+            EXTRACT(YEAR FROM t.date_signed)::int as signed_year,
+            CASE
+                WHEN t.is_validated THEN 'Active'
+                ELSE 'Unknown'
+            END as status,
+            CASE
+                WHEN t.is_validated THEN 'Verified'
+                ELSE 'Reported'
+            END as certainty,
+            ST_AsMVTGeom(
+                ST_Simplify(tg.geometry, {}),
+                ST_MakeEnvelope({}, {}, {}, {}, 4326),
+                {},
+                {},
+                true
+            ) as geom
+        FROM raw_treaties t
+        JOIN treaty_geometries tg ON tg.treaty_id = t.id
+        WHERE ST_Intersects(
+            tg.geometry,
+            ST_MakeEnvelope({}, {}, {}, {}, 4326)
+        )
+        AND tg.geometry IS NOT NULL
+    ",
+        simplify_tolerance,
+        bounds.0, bounds.1, bounds.2, bounds.3,
+        TILE_EXTENT, TILE_BUFFER,
+        bounds.0, bounds.1, bounds.2, bounds.3
+    );
+
+    ≔ rows = state.db.query(&sql, &[]).await
+        .map_err(|e| format!("Database error: {}", e))?;
+
+    // Build MVT layer
+    ≔ vary layer = Layer::new("treaties");
+
+    ∀ row ∈ rows {
+        ⎇ ≔ geom_bytes = row.get::<Option<Vec<u8>>>("geom") {
+            ≔ vary feature = Feature::new(geom_bytes);
+
+            feature.set_property("id", row.get::<String>("id"));
+            feature.set_property("name", row.get::<String>("name"));
+
+            ⎇ ≔ year = row.get::<Option<i32>>("signed_year") {
+                feature.set_property("signed_year", year);
+            }
+
+            feature.set_property("status", row.get::<String>("status"));
+            feature.set_property("certainty", row.get::<String>("certainty"));
+
+            layer.add_feature(feature);
+        }
+    }
+
+    // Build tile
+    ≔ vary tile = Tile::new();
+    tile.add_layer(layer);
+
+    // Compress and return
+    tile.to_gzip_bytes()
+        .map_err(|e| format!("Tile encoding error: {}", e))
+}
+
+async rite generate_tribe_tile(state: &AppState, z: u8, x: u32, y: u32) -> Result<Vec<u8>, String> {
+    // Similar to treaty tiles but for tribe territories
+    // For now, return empty tile as tribe geometries aren't loaded yet
+
+    ≔ vary tile = Tile::new();
+    ≔ layer = Layer::new("tribes");
+    tile.add_layer(layer);
+
+    tile.to_gzip_bytes()
+        .map_err(|e| format!("Tile encoding error: {}", e))
+}
+
+async rite generate_boundary_tile(state: &AppState, z: u8, x: u32, y: u32) -> Result<Vec<u8>, String> {
+    // Historical boundary lines (treaty boundaries over time)
+    // For now, return empty tile
+
+    ≔ vary tile = Tile::new();
+    ≔ layer = Layer::new("boundaries");
+    tile.add_layer(layer);
+
+    tile.to_gzip_bytes()
+        .map_err(|e| format!("Tile encoding error: {}", e))
+}
+
+// ============================================================================
+// Tile Math
+// ============================================================================
+
+/// Converts tile coordinates to geographic bounding box
+rite tile_to_bbox(z: u8, x: u32, y: u32) -> (f64, f64, f64, f64) {
+    ≔ n = (1u32 << z) as f64;
+
+    ≔ lon_min = (x as f64 / n) * 360.0 - 180.0;
+    ≔ lon_max = ((x + 1) as f64 / n) * 360.0 - 180.0;
+
+    ≔ lat_max = (std::f64::consts::PI * (1.0 - 2.0 * y as f64 / n)).sinh().atan().to_degrees();
+    ≔ lat_min = (std::f64::consts::PI * (1.0 - 2.0 * (y + 1) as f64 / n)).sinh().atan().to_degrees();
+
+    (lon_min, lat_min, lon_max, lat_max)
+}
+
+/// Calculates simplification tolerance based on zoom level
+rite simplify_for_zoom(z: u8) -> f64 {
+    // Higher zoom = less simplification
+    ⌥ z {
+        0..=2 => 0.1,
+        3..=5 => 0.01,
+        6..=8 => 0.001,
+        9..=11 => 0.0001,
+        _ => 0.00001,
+    }
+}
+
+/// Returns an empty MVT tile
+rite empty_tile() -> Vec<u8> {
+    ≔ vary tile = Tile::new();
+    tile.to_gzip_bytes().unwrap_or_default()
+}

@@ -1,0 +1,12 @@
+//! Page Components
+//!
+//! Top-level page components for routing.
+
+// For now, the main app is a single-page application.
+// These will be implemented as the routing is built out.
+
+// ☉ scroll home;
+// ☉ scroll treaties;
+// ☉ scroll tribes;
+// ☉ scroll timeline;
+// ☉ scroll about;

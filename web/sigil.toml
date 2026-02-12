@@ -1,0 +1,25 @@
+[project]
+name = "windwalker-web"
+version = "0.1.0"
+edition = "2025"
+sigil-version = "0.2.0"
+description = "Windwalker Native Treaty Mapping Initiative - Web Interface"
+
+[dependencies]
+qliphoth = { path = "../../qliphoth", version = "0.2.0", features = ["full"] }
+qliphoth-sys = { path = "../../qliphoth/packages/qliphoth-sys", version = "0.2.0", features = ["full"] }
+qliphoth-router = { path = "../../qliphoth/packages/qliphoth-router", version = "0.2.0" }
+
+[features]
+default = ["hydration"]
+ssr = []
+hydration = []
+full = ["ssr", "hydration"]
+
+[compile]
+backend = "llvm"
+target = "wasm32-unknown-unknown"
+
+[compile.wasm]
+opt-level = "z"
+features = ["+simd128"]

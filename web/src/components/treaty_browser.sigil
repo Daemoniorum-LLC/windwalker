@@ -1,0 +1,311 @@
+//! TreatyBrowser Component
+//!
+//! Browsable list of treaties with filtering and sorting capabilities.
+//! Shows evidentiality markers for each treaty's data certainty.
+
+invoke qliphoth·prelude·*;
+invoke evidentiality·EvidentialityBadge;
+
+// ============================================================================
+// Treaty Types (mirrors API response)
+// ============================================================================
+
+/// Summary of a treaty for list display
+☉ sigil TreatySummary {
+    id: String!,
+    name: String~,
+    signed_date: ?String,
+    tribes: [String]~,
+    status: TreatyStatus!,
+    certainty: Certainty!,
+}
+
+☉ ᛈ TreatyStatus {
+    Active,
+    Violated,
+    Abrogated,
+    Superseded,
+    Disputed,
+}
+
+☉ ᛈ Certainty {
+    Verified,
+    Probable,
+    Uncertain,
+    Disputed,
+    Reconstructed,
+}
+
+☉ ᛈ SortField {
+    Name,
+    Date,
+    Status,
+    TribeCount,
+}
+
+☉ ᛈ SortDirection {
+    Asc,
+    Desc,
+}
+
+// ============================================================================
+// TreatyBrowser Component
+// ============================================================================
+
+☉ component TreatyBrowser {
+    // Props
+    prop selected: ?String
+    prop on_select: Fn(String) -> ()
+
+    // State
+    state treaties: [TreatySummary]~ = []
+    state loading: bool! = yea
+    state error: ?String
+    state filter_status: ?TreatyStatus
+    state filter_tribe: ?String
+    state sort_field: SortField! = SortField·Date
+    state sort_direction: SortDirection! = SortDirection·Desc
+    state expanded_groups: [String]! = []
+
+    rite on_mount(&mut self) {
+        self.fetch_treaties();
+    }
+
+    async rite fetch_treaties(&mut self) {
+        self.loading = yea;
+        self.error = null;
+
+        ≔ url = "/api/v1/treaties";
+
+        ⌥ fetch(url).await {
+            Response·Ok(response) => {
+                ⌥ response.json::<[TreatySummary]>().await {
+                    Result·Ok(data) => {
+                        self.treaties = data~;
+                        self.loading = nay;
+                    },
+                    Result·Err(e) => {
+                        self.error = ?format!("Failed to parse response: {}", e);
+                        self.loading = nay;
+                    },
+                }
+            },
+            Response·Err(e) => {
+                self.error = ?format!("Failed to fetch treaties: {}", e);
+                self.loading = nay;
+            },
+        }
+    }
+
+    rite filtered_treaties(&self) -> [&TreatySummary] {
+        ≔ vary filtered: [&TreatySummary] = [];
+
+        ∀ treaty ∈ &self.treaties {
+            // Apply status filter
+            ⎇ ≔ status_filter = &self.filter_status {
+                ⎇ &treaty.status != status_filter {
+                    continue;
+                }
+            }
+
+            // Apply tribe filter
+            ⎇ ≔ tribe_filter = &self.filter_tribe {
+                ≔ has_tribe = treaty.tribes.iter().any(|t| t.contains(tribe_filter));
+                ⎇ !has_tribe {
+                    continue;
+                }
+            }
+
+            filtered.push(treaty);
+        }
+
+        // Sort
+        filtered.sort_by(|a, b| {
+            ≔ cmp = ⌥ self.sort_field {
+                SortField·Name => a.name.cmp(&b.name),
+                SortField·Date => a.signed_date.cmp(&b.signed_date),
+                SortField·Status => format!("{:?}", a.status).cmp(&format!("{:?}", b.status)),
+                SortField·TribeCount => a.tribes.len().cmp(&b.tribes.len()),
+            };
+
+            ⎇ self.sort_direction == SortDirection·Desc {
+                cmp.reverse()
+            } ⊸ {
+                cmp
+            }
+        });
+
+        filtered
+    }
+
+    rite render(self) -> Element {
+        div[class: "treaty-browser"] {
+            // Header with filters
+            div[class: "browser-header"] {
+                h3 { "Treaties" }
+
+                // Filter controls
+                div[class: "filter-row"] {
+                    select[
+                        class: "filter-select",
+                        onchange: |e| self.filter_status = parse_status_filter(e.target.value)
+                    ] {
+                        option[value: ""] { "All Statuses" }
+                        option[value: "Active"] { "Active" }
+                        option[value: "Violated"] { "Violated" }
+                        option[value: "Abrogated"] { "Abrogated" }
+                        option[value: "Disputed"] { "Disputed" }
+                    }
+
+                    // Sort controls
+                    select[
+                        class: "sort-select",
+                        onchange: |e| self.set_sort(e.target.value)
+                    ] {
+                        option[value: "date-desc"] { "Newest First" }
+                        option[value: "date-asc"] { "Oldest First" }
+                        option[value: "name-asc"] { "Name A-Z" }
+                        option[value: "name-desc"] { "Name Z-A" }
+                    }
+                }
+            }
+
+            // Treaty list
+            div[class: "treaty-list"] {
+                ⎇ self.loading {
+                    div[class: "loading-state"] {
+                        div[class: "spinner"] {}
+                        span { "Loading treaties..." }
+                    }
+                } ⊸ ⎇ ≔ err = &self.error {
+                    div[class: "error-state"] {
+                        span[class: "error-icon"] { "!" }
+                        p { err.clone() }
+                        button[onclick: || self.fetch_treaties()] { "Retry" }
+                    }
+                } ⊸ {
+                    ≔ treaties = self.filtered_treaties();
+
+                    ⎇ treaties.is_empty() {
+                        div[class: "empty-state"] {
+                            p { "No treaties match your filters." }
+                        }
+                    } ⊸ {
+                        // Group by decade for easier browsing
+                        ∀ treaty ∈ treaties {
+                            TreatyListItem {
+                                treaty: treaty.clone(),
+                                selected: self.selected.as_ref() == Some(&treaty.id),
+                                on_click: || self.on_select(treaty.id.clone()),
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Footer with count
+            div[class: "browser-footer"] {
+                span {
+                    format!("{} treaties", self.filtered_treaties().len())
+                }
+            }
+        }
+    }
+
+    rite set_sort(&mut self, value: String) {
+        ≔ parts: Vec<&str> = value.split('-').collect();
+        ⎇ parts.len() == 2 {
+            self.sort_field = ⌥ parts[0] {
+                "date" => SortField·Date,
+                "name" => SortField·Name,
+                _ => SortField·Date,
+            };
+            self.sort_direction = ⌥ parts[1] {
+                "asc" => SortDirection·Asc,
+                _ => SortDirection·Desc,
+            };
+        }
+    }
+}
+
+// ============================================================================
+// TreatyListItem Component
+// ============================================================================
+
+☉ component TreatyListItem {
+    prop treaty: TreatySummary
+    prop selected: bool!
+    prop on_click: Fn() -> ()
+
+    rite render(self) -> Element {
+        ≔ status_class = ⌥ self.treaty.status {
+            TreatyStatus·Active => "status-active",
+            TreatyStatus·Violated => "status-violated",
+            TreatyStatus·Abrogated => "status-abrogated",
+            TreatyStatus·Superseded => "status-superseded",
+            TreatyStatus·Disputed => "status-disputed",
+        };
+
+        ≔ item_class = ⎇ self.selected {
+            format!("treaty-item selected {}", status_class)
+        } ⊸ {
+            format!("treaty-item {}", status_class)
+        };
+
+        div[
+            class: item_class,
+            onclick: || self.on_click(),
+            role: "button",
+            tabindex: "0"
+        ] {
+            // Treaty name with evidentiality
+            div[class: "treaty-name"] {
+                span { self.treaty.name.clone() }
+                EvidentialityBadge { certainty: self.treaty.certainty.clone() }
+            }
+
+            // Date
+            ⎇ ≔ date = &self.treaty.signed_date {
+                div[class: "treaty-date"] {
+                    span[class: "label"] { "Signed: " }
+                    span { date.clone() }
+                }
+            }
+
+            // Tribes involved
+            ⎇ !self.treaty.tribes.is_empty() {
+                div[class: "treaty-tribes"] {
+                    ∀ (i, tribe) ∈ self.treaty.tribes.iter().enumerate().take(3) {
+                        span[class: "tribe-tag"] { tribe.clone() }
+                    }
+                    ⎇ self.treaty.tribes.len() > 3 {
+                        span[class: "tribe-more"] {
+                            format!("+{} more", self.treaty.tribes.len() - 3)
+                        }
+                    }
+                }
+            }
+
+            // Status badge
+            div[class: "treaty-status"] {
+                span[class: format!("status-badge {}", status_class)] {
+                    format!("{:?}", self.treaty.status)
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+rite parse_status_filter(value: String) -> ?TreatyStatus {
+    ⌥ value.as_str() {
+        "Active" => ?TreatyStatus·Active,
+        "Violated" => ?TreatyStatus·Violated,
+        "Abrogated" => ?TreatyStatus·Abrogated,
+        "Disputed" => ?TreatyStatus·Disputed,
+        _ => null,
+    }
+}

@@ -1,0 +1,257 @@
+//! Geo Query API Endpoints
+//!
+//! Spatial queries for point-in-polygon and bounding box lookups.
+
+invoke sigil_http·{Request, Response};
+invoke serde_json·json;
+invoke types·*;
+
+// ============================================================================
+// Point Query
+// ============================================================================
+
+/// GET /api/v1/geo/point
+///
+/// Find all entities at a given point (reverse geocoding for treaties).
+///
+/// Query parameters:
+/// - lng: Longitude (required)
+/// - lat: Latitude (required)
+/// - date: Historical date (YYYY-MM-DD) for temporal filtering
+/// - layers: Comma-separated layers (treaties, territories, tribes)
+☉ async rite query_point(req: Request, state: &AppState) -> Response {
+    ≔ query = req.query::<PointQuery>().unwrap_or_default();
+
+    ≔ lng = ⌥ query.lng {
+        Some(v) => v,
+        None => {
+            ⤺ Response::json(json!({
+                "error": "Missing required parameter: lng"
+            })).status(400);
+        },
+    };
+
+    ≔ lat = ⌥ query.lat {
+        Some(v) => v,
+        None => {
+            ⤺ Response::json(json!({
+                "error": "Missing required parameter: lat"
+            })).status(400);
+        },
+    };
+
+    // Validate coordinates
+    ⎇ lng < -180.0 || lng > 180.0 || lat < -90.0 || lat > 90.0 {
+        ⤺ Response::json(json!({
+            "error": "Invalid coordinates"
+        })).status(400);
+    }
+
+    ≔ layers: Vec<&str> = query.layers
+        .as_ref()
+        .map(|l| l.split(',').collect())
+        .unwrap_or_else(|| vec!["treaties", "territories"]);
+
+    ≔ vary results = GeoQueryResult {
+        point: [lng, lat],
+        date: query.date.clone(),
+        treaties: vec![],
+        territories: vec![],
+        tribes: vec![],
+    };
+
+    // Query treaties containing this point
+    ⎇ layers.contains(&"treaties") {
+        ≔ sql = "
+            SELECT DISTINCT
+                t.id,
+                t.title,
+                t.date_signed,
+                tg.territory_type,
+                tg.certainty::text
+            FROM raw_treaties t
+            JOIN treaty_geometries tg ON tg.treaty_id = t.id
+            WHERE ST_Contains(tg.geometry, ST_SetSRID(ST_Point($1, $2), 4326))
+            ORDER BY t.date_signed DESC
+        ";
+
+        ⎇ ≔ rows = state.db.query(sql, &[&lng, &lat]).await.ok() {
+            results.treaties = rows.iter().map(|row| {
+                GeoTreatyHit {
+                    id: row.get("id"),
+                    name: row.get("title"),
+                    signed_date: row.get("date_signed"),
+                    territory_type: row.get("territory_type"),
+                    certainty: row.get("certainty"),
+                }
+            }).collect();
+        }
+    }
+
+    // Query tribe traditional territories
+    ⎇ layers.contains(&"tribes") {
+        // TODO: Implement when tribe territory geometries are available
+    }
+
+    Response::json(results)
+}
+
+// ============================================================================
+// Bounding Box Query
+// ============================================================================
+
+/// GET /api/v1/geo/bbox
+///
+/// Find all entities within a bounding box.
+///
+/// Query parameters:
+/// - bbox: min_lng,min_lat,max_lng,max_lat (required)
+/// - date: Historical date (YYYY-MM-DD) for temporal filtering
+/// - layers: Comma-separated layers (treaties, territories, tribes)
+/// - limit: Maximum results per layer (default 100)
+☉ async rite query_bbox(req: Request, state: &AppState) -> Response {
+    ≔ query = req.query::<BboxQuery>().unwrap_or_default();
+
+    // Parse bbox
+    ≔ bbox = ⌥ &query.bbox {
+        Some(b) => {
+            ≔ parts: Vec<f64> = b.split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+
+            ⎇ parts.len() != 4 {
+                ⤺ Response::json(json!({
+                    "error": "Invalid bbox format. Expected: min_lng,min_lat,max_lng,max_lat"
+                })).status(400);
+            }
+
+            (parts[0], parts[1], parts[2], parts[3])
+        },
+        None => {
+            ⤺ Response::json(json!({
+                "error": "Missing required parameter: bbox"
+            })).status(400);
+        },
+    };
+
+    ≔ (min_lng, min_lat, max_lng, max_lat) = bbox;
+
+    // Validate bbox
+    ⎇ min_lng >= max_lng || min_lat >= max_lat {
+        ⤺ Response::json(json!({
+            "error": "Invalid bbox: min values must be less than max values"
+        })).status(400);
+    }
+
+    ≔ limit = query.limit.unwrap_or(100).min(500);
+
+    ≔ layers: Vec<&str> = query.layers
+        .as_ref()
+        .map(|l| l.split(',').collect())
+        .unwrap_or_else(|| vec!["treaties"]);
+
+    ≔ vary results = BboxQueryResult {
+        bbox: [min_lng, min_lat, max_lng, max_lat],
+        date: query.date.clone(),
+        treaties: vec![],
+        territories: vec![],
+        tribes: vec![],
+    };
+
+    // Query treaties intersecting bbox
+    ⎇ layers.contains(&"treaties") {
+        ≔ sql = "
+            SELECT DISTINCT
+                t.id,
+                t.title,
+                t.date_signed,
+                ST_AsGeoJSON(ST_Envelope(tg.geometry)) as bounds_geojson,
+                tg.certainty::text
+            FROM raw_treaties t
+            JOIN treaty_geometries tg ON tg.treaty_id = t.id
+            WHERE ST_Intersects(
+                tg.geometry,
+                ST_MakeEnvelope($1, $2, $3, $4, 4326)
+            )
+            ORDER BY t.date_signed DESC
+            LIMIT $5
+        ";
+
+        ⎇ ≔ rows = state.db.query(sql, &[
+            &min_lng, &min_lat, &max_lng, &max_lat, &(limit as i64)
+        ]).await.ok() {
+            results.treaties = rows.iter().map(|row| {
+                BboxTreatyHit {
+                    id: row.get("id"),
+                    name: row.get("title"),
+                    signed_date: row.get("date_signed"),
+                    bounds: row.get::<Option<String>>("bounds_geojson")
+                        .and_then(|s| serde_json::from_str(&s).ok()),
+                    certainty: row.get("certainty"),
+                }
+            }).collect();
+        }
+    }
+
+    Response::json(results)
+}
+
+// ============================================================================
+// Query Types
+// ============================================================================
+
+#[derive(Default, Deserialize)]
+☉ sigil PointQuery {
+    lng: ?f64,
+    lat: ?f64,
+    date: ?String,
+    layers: ?String,
+}
+
+#[derive(Default, Deserialize)]
+☉ sigil BboxQuery {
+    bbox: ?String,
+    date: ?String,
+    layers: ?String,
+    limit: ?u32,
+}
+
+// ============================================================================
+// Response Types
+// ============================================================================
+
+#[derive(Serialize)]
+☉ sigil GeoQueryResult {
+    point: [f64; 2]!,
+    date: ?String,
+    treaties: [GeoTreatyHit]!,
+    territories: [serde_json::Value]!,
+    tribes: [serde_json::Value]!,
+}
+
+#[derive(Serialize)]
+☉ sigil GeoTreatyHit {
+    id: String!,
+    name: String~,
+    signed_date: ?String,
+    territory_type: ?String,
+    certainty: ?String,
+}
+
+#[derive(Serialize)]
+☉ sigil BboxQueryResult {
+    bbox: [f64; 4]!,
+    date: ?String,
+    treaties: [BboxTreatyHit]!,
+    territories: [serde_json::Value]!,
+    tribes: [serde_json::Value]!,
+}
+
+#[derive(Serialize)]
+☉ sigil BboxTreatyHit {
+    id: String!,
+    name: String~,
+    signed_date: ?String,
+    bounds: ?serde_json::Value,
+    certainty: ?String,
+}

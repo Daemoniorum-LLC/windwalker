@@ -1,0 +1,438 @@
+//! DetailPanel Component
+//!
+//! Shows detailed information about a selected treaty, including:
+//! - Full treaty text
+//! - Parties involved
+//! - Geographic bounds
+//! - Legal status and violations
+//! - Source provenance with evidentiality markers
+
+invoke qliphoth·prelude·*;
+invoke evidentiality·{EvidentialityBadge, EvidentialityLegend};
+
+// ============================================================================
+// Treaty Detail Types
+// ============================================================================
+
+☉ sigil TreatyDetail {
+    id: String!,
+    name: String~,
+    alternate_names: [String]~,
+
+    // Dates
+    signed_date: ?String,
+    ratified_date: ?String,
+    proclaimed_date: ?String,
+
+    // Parties
+    tribes: [TribeRef]~,
+    us_commissioners: [String]~,
+    tribal_signatories: [SignatoryInfo]~,
+
+    // Legal
+    status: TreatyStatus!,
+    violations: [ViolationInfo]~,
+    affecting_laws: [LawRef]~,
+
+    // Content
+    preamble: ?String,
+    articles: [ArticleInfo]~,
+
+    // Geography
+    ceded_territory_acres: ?f64,
+    reserved_territory_acres: ?f64,
+    boundary_certainty: Certainty!,
+
+    // Sources
+    sources: [SourceInfo]~,
+    kappler_citation: ?String,
+    statutes_at_large: ?String,
+}
+
+☉ sigil TribeRef {
+    id: String!,
+    name: String~,
+}
+
+☉ sigil SignatoryInfo {
+    name: String~,
+    title: ?String,
+    tribe: ?String,
+    mark_type: ?String,
+}
+
+☉ sigil ViolationInfo {
+    description: String~,
+    date: ?String,
+    violating_action: String~,
+}
+
+☉ sigil LawRef {
+    id: String!,
+    name: String~,
+    enacted_date: ?String,
+}
+
+☉ sigil ArticleInfo {
+    number: u32!,
+    title: ?String,
+    text: String~,
+}
+
+☉ sigil SourceInfo {
+    name: String!,
+    source_type: String!,
+    url: ?String,
+    reliability: f64!,
+    accessed_date: ?String,
+}
+
+// ============================================================================
+// DetailPanel Component
+// ============================================================================
+
+☉ component DetailPanel {
+    prop treaty_id: String!
+    prop on_close: Fn() -> ()
+
+    state treaty: ?TreatyDetail
+    state loading: bool! = yea
+    state error: ?String
+    state active_tab: Tab! = Tab·Overview
+
+    rite on_mount(&mut self) {
+        self.fetch_treaty();
+    }
+
+    rite on_update(&mut self, prev_props: &Props) {
+        ⎇ prev_props.treaty_id != self.treaty_id {
+            self.fetch_treaty();
+        }
+    }
+
+    async rite fetch_treaty(&mut self) {
+        self.loading = yea;
+        self.error = null;
+
+        ≔ url = format!("/api/v1/treaties/{}", self.treaty_id);
+
+        ⌥ fetch(&url).await {
+            Response·Ok(response) => {
+                ⌥ response.json::<TreatyDetail>().await {
+                    Result·Ok(data) => {
+                        self.treaty = ?data;
+                        self.loading = nay;
+                    },
+                    Result·Err(e) => {
+                        self.error = ?format!("Failed to parse treaty: {}", e);
+                        self.loading = nay;
+                    },
+                }
+            },
+            Response·Err(e) => {
+                self.error = ?format!("Failed to fetch treaty: {}", e);
+                self.loading = nay;
+            },
+        }
+    }
+
+    rite render(self) -> Element {
+        div[class: "detail-panel"] {
+            // Header
+            div[class: "panel-header"] {
+                button[
+                    class: "close-btn",
+                    onclick: || self.on_close(),
+                    title: "Close"
+                ] { "x" }
+
+                ⎇ ≔ treaty = &self.treaty {
+                    h2 { treaty.name.clone() }
+                    EvidentialityBadge { certainty: treaty.boundary_certainty.clone() }
+                }
+            }
+
+            // Tabs
+            div[class: "panel-tabs"] {
+                button[
+                    class: self.tab_class(Tab·Overview),
+                    onclick: || self.active_tab = Tab·Overview
+                ] { "Overview" }
+                button[
+                    class: self.tab_class(Tab·Parties),
+                    onclick: || self.active_tab = Tab·Parties
+                ] { "Parties" }
+                button[
+                    class: self.tab_class(Tab·Text),
+                    onclick: || self.active_tab = Tab·Text
+                ] { "Text" }
+                button[
+                    class: self.tab_class(Tab·Legal),
+                    onclick: || self.active_tab = Tab·Legal
+                ] { "Legal" }
+                button[
+                    class: self.tab_class(Tab·Sources),
+                    onclick: || self.active_tab = Tab·Sources
+                ] { "Sources" }
+            }
+
+            // Content
+            div[class: "panel-content"] {
+                ⎇ self.loading {
+                    div[class: "loading-state"] {
+                        div[class: "spinner"] {}
+                        span { "Loading treaty details..." }
+                    }
+                } ⊸ ⎇ ≔ err = &self.error {
+                    div[class: "error-state"] {
+                        p { err.clone() }
+                    }
+                } ⊸ ⎇ ≔ treaty = &self.treaty {
+                    ⌥ self.active_tab {
+                        Tab·Overview => self.render_overview(treaty),
+                        Tab·Parties => self.render_parties(treaty),
+                        Tab·Text => self.render_text(treaty),
+                        Tab·Legal => self.render_legal(treaty),
+                        Tab·Sources => self.render_sources(treaty),
+                    }
+                }
+            }
+        }
+    }
+
+    rite tab_class(&self, tab: Tab) -> String {
+        ⎇ self.active_tab == tab {
+            "tab-btn active".to_string()
+        } ⊸ {
+            "tab-btn".to_string()
+        }
+    }
+
+    rite render_overview(&self, treaty: &TreatyDetail) -> Element {
+        div[class: "tab-content overview"] {
+            // Status
+            div[class: "info-section"] {
+                h4 { "Status" }
+                div[class: format!("status-badge status-{:?}", treaty.status).to_lowercase()] {
+                    format!("{:?}", treaty.status)
+                }
+            }
+
+            // Dates
+            div[class: "info-section"] {
+                h4 { "Key Dates" }
+                dl[class: "date-list"] {
+                    ⎇ ≔ date = &treaty.signed_date {
+                        dt { "Signed" }
+                        dd { date.clone() }
+                    }
+                    ⎇ ≔ date = &treaty.ratified_date {
+                        dt { "Ratified" }
+                        dd { date.clone() }
+                    }
+                    ⎇ ≔ date = &treaty.proclaimed_date {
+                        dt { "Proclaimed" }
+                        dd { date.clone() }
+                    }
+                }
+            }
+
+            // Tribes
+            div[class: "info-section"] {
+                h4 { "Tribal Nations" }
+                div[class: "tribe-list"] {
+                    ∀ tribe ∈ &treaty.tribes {
+                        a[
+                            class: "tribe-link",
+                            href: format!("/tribes/{}", tribe.id)
+                        ] { tribe.name.clone() }
+                    }
+                }
+            }
+
+            // Territory
+            div[class: "info-section"] {
+                h4 { "Territory" }
+                dl {
+                    ⎇ ≔ acres = treaty.ceded_territory_acres {
+                        dt { "Ceded" }
+                        dd { format!("{:.0} acres", acres) }
+                    }
+                    ⎇ ≔ acres = treaty.reserved_territory_acres {
+                        dt { "Reserved" }
+                        dd { format!("{:.0} acres", acres) }
+                    }
+                }
+                div[class: "certainty-note"] {
+                    span { "Boundary certainty: " }
+                    EvidentialityBadge { certainty: treaty.boundary_certainty.clone() }
+                }
+            }
+
+            // Citations
+            div[class: "info-section"] {
+                h4 { "Citations" }
+                ⎇ ≔ kappler = &treaty.kappler_citation {
+                    p { format!("Kappler: {}", kappler) }
+                }
+                ⎇ ≔ sal = &treaty.statutes_at_large {
+                    p { format!("Statutes at Large: {}", sal) }
+                }
+            }
+        }
+    }
+
+    rite render_parties(&self, treaty: &TreatyDetail) -> Element {
+        div[class: "tab-content parties"] {
+            // US Representatives
+            div[class: "party-section"] {
+                h4 { "US Commissioners" }
+                ul[class: "commissioner-list"] {
+                    ∀ name ∈ &treaty.us_commissioners {
+                        li { name.clone() }
+                    }
+                }
+            }
+
+            // Tribal Signatories
+            div[class: "party-section"] {
+                h4 { "Tribal Signatories" }
+                div[class: "signatory-grid"] {
+                    ∀ sig ∈ &treaty.tribal_signatories {
+                        div[class: "signatory-card"] {
+                            span[class: "sig-name"] { sig.name.clone() }
+                            ⎇ ≔ title = &sig.title {
+                                span[class: "sig-title"] { title.clone() }
+                            }
+                            ⎇ ≔ tribe = &sig.tribe {
+                                span[class: "sig-tribe"] { tribe.clone() }
+                            }
+                            ⎇ ≔ mark = &sig.mark_type {
+                                span[class: "sig-mark"] {
+                                    format!("({})", mark)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    rite render_text(&self, treaty: &TreatyDetail) -> Element {
+        div[class: "tab-content text"] {
+            // Preamble
+            ⎇ ≔ preamble = &treaty.preamble {
+                div[class: "treaty-preamble"] {
+                    h4 { "Preamble" }
+                    p { preamble.clone() }
+                }
+            }
+
+            // Articles
+            div[class: "treaty-articles"] {
+                h4 { "Articles" }
+                ∀ article ∈ &treaty.articles {
+                    div[class: "article"] {
+                        h5 {
+                            format!("Article {}", article.number)
+                            ⎇ ≔ title = &article.title {
+                                span { format!(": {}", title) }
+                            }
+                        }
+                        p { article.text.clone() }
+                    }
+                }
+            }
+        }
+    }
+
+    rite render_legal(&self, treaty: &TreatyDetail) -> Element {
+        div[class: "tab-content legal"] {
+            // Violations
+            ⎇ !treaty.violations.is_empty() {
+                div[class: "violations-section"] {
+                    h4 { "Known Violations" }
+                    ∀ violation ∈ &treaty.violations {
+                        div[class: "violation-card"] {
+                            ⎇ ≔ date = &violation.date {
+                                span[class: "violation-date"] { date.clone() }
+                            }
+                            p[class: "violation-desc"] { violation.description.clone() }
+                            span[class: "violation-action"] { violation.violating_action.clone() }
+                        }
+                    }
+                }
+            }
+
+            // Affecting laws
+            ⎇ !treaty.affecting_laws.is_empty() {
+                div[class: "laws-section"] {
+                    h4 { "Related Laws" }
+                    ∀ law ∈ &treaty.affecting_laws {
+                        a[
+                            class: "law-link",
+                            href: format!("/laws/{}", law.id)
+                        ] {
+                            span[class: "law-name"] { law.name.clone() }
+                            ⎇ ≔ date = &law.enacted_date {
+                                span[class: "law-date"] { format!(" ({})", date) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    rite render_sources(&self, treaty: &TreatyDetail) -> Element {
+        div[class: "tab-content sources"] {
+            h4 { "Data Sources" }
+            EvidentialityLegend {}
+
+            div[class: "source-list"] {
+                ∀ source ∈ &treaty.sources {
+                    div[class: "source-card"] {
+                        div[class: "source-header"] {
+                            span[class: "source-name"] { source.name.clone() }
+                            span[class: format!("source-type type-{}", source.source_type.to_lowercase())] {
+                                source.source_type.clone()
+                            }
+                        }
+
+                        div[class: "source-reliability"] {
+                            span { "Reliability: " }
+                            div[class: "reliability-bar"] {
+                                div[
+                                    class: "reliability-fill",
+                                    style: format!("width: {}%", source.reliability * 100.0)
+                                ] {}
+                            }
+                            span { format!("{:.0}%", source.reliability * 100.0) }
+                        }
+
+                        ⎇ ≔ url = &source.url {
+                            a[class: "source-link", href: url.clone(), target: "_blank"] {
+                                "View Source"
+                            }
+                        }
+
+                        ⎇ ≔ date = &source.accessed_date {
+                            span[class: "source-accessed"] {
+                                format!("Accessed: {}", date)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+☉ ᛈ Tab {
+    Overview,
+    Parties,
+    Text,
+    Legal,
+    Sources,
+}

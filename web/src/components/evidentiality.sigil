@@ -1,0 +1,200 @@
+//! Evidentiality Components
+//!
+//! Visual indicators for data certainty levels.
+//! Critical for Jim to understand which data is verified vs uncertain.
+//!
+//! Evidentiality markers:
+//!   !  = verified (computed/cross-referenced)
+//!   ~  = reported (from authoritative source)
+//!   ?  = uncertain (may not exist)
+//!   ‽  = paradox (conflicting sources)
+
+invoke qliphoth·prelude·*;
+
+// ============================================================================
+// Certainty Enum (imported from treaty types)
+// ============================================================================
+
+☉ ᛈ Certainty {
+    Verified,       // ! - Multiple corroborating sources
+    Probable,       // Between verified and uncertain
+    Uncertain,      // ? - Limited evidence
+    Disputed,       // ‽ - Sources disagree
+    Reconstructed,  // Inferred from indirect evidence
+}
+
+// ============================================================================
+// EvidentialityBadge Component
+// ============================================================================
+
+/// Small badge showing the evidentiality level of a data point
+☉ component EvidentialityBadge {
+    prop certainty: Certainty!
+
+    rite render(self) -> Element {
+        ≔ (marker, class, title) = ⌥ self.certainty {
+            Certainty·Verified => (
+                "!",
+                "ev-verified",
+                "Verified: Cross-referenced from multiple authoritative sources"
+            ),
+            Certainty·Probable => (
+                "~",
+                "ev-probable",
+                "Probable: From authoritative source, high confidence"
+            ),
+            Certainty·Uncertain => (
+                "?",
+                "ev-uncertain",
+                "Uncertain: Limited evidence, may be incomplete"
+            ),
+            Certainty·Disputed => (
+                "‽",
+                "ev-disputed",
+                "Disputed: Sources conflict on this data"
+            ),
+            Certainty·Reconstructed => (
+                "~?",
+                "ev-reconstructed",
+                "Reconstructed: Inferred from indirect evidence"
+            ),
+        };
+
+        span[
+            class: format!("evidentiality-badge {}", class),
+            title: title.to_string()
+        ] {
+            marker.to_string()
+        }
+    }
+}
+
+// ============================================================================
+// EvidentialityLegend Component
+// ============================================================================
+
+/// Legend explaining evidentiality markers
+☉ component EvidentialityLegend {
+    state expanded: bool! = nay
+
+    rite render(self) -> Element {
+        div[class: "evidentiality-legend"] {
+            button[
+                class: "legend-toggle",
+                onclick: || self.expanded = !self.expanded
+            ] {
+                span { "Data Certainty Guide" }
+                span[class: "toggle-icon"] {
+                    ⎇ self.expanded { "v" } ⊸ { ">" }
+                }
+            }
+
+            ⎇ self.expanded {
+                div[class: "legend-content"] {
+                    p[class: "legend-intro"] {
+                        "All data in Windwalker carries evidentiality markers showing how certain we are about each piece of information."
+                    }
+
+                    div[class: "legend-items"] {
+                        div[class: "legend-item"] {
+                            span[class: "legend-marker ev-verified"] { "!" }
+                            div[class: "legend-text"] {
+                                strong { "Verified" }
+                                p { "Cross-referenced from multiple authoritative sources. Highest confidence." }
+                            }
+                        }
+
+                        div[class: "legend-item"] {
+                            span[class: "legend-marker ev-probable"] { "~" }
+                            div[class: "legend-text"] {
+                                strong { "Reported" }
+                                p { "From a single authoritative source (e.g., National Archives, Kappler). High confidence." }
+                            }
+                        }
+
+                        div[class: "legend-item"] {
+                            span[class: "legend-marker ev-uncertain"] { "?" }
+                            div[class: "legend-text"] {
+                                strong { "Uncertain" }
+                                p { "Limited or incomplete evidence. May require additional research." }
+                            }
+                        }
+
+                        div[class: "legend-item"] {
+                            span[class: "legend-marker ev-disputed"] { "‽" }
+                            div[class: "legend-text"] {
+                                strong { "Disputed" }
+                                p { "Sources conflict on this data. Multiple interpretations exist." }
+                            }
+                        }
+
+                        div[class: "legend-item"] {
+                            span[class: "legend-marker ev-reconstructed"] { "~?" }
+                            div[class: "legend-text"] {
+                                strong { "Reconstructed" }
+                                p { "Inferred from indirect evidence. Based on historical context and related documents." }
+                            }
+                        }
+                    }
+
+                    p[class: "legend-note"] {
+                        "Boundaries shown with dashed lines indicate uncertain or disputed territory. Click any marker to see the source data."
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// EvidentialityTooltip Component
+// ============================================================================
+
+/// Tooltip showing detailed provenance for a data point
+☉ component EvidentialityTooltip {
+    prop field_name: String!
+    prop certainty: Certainty!
+    prop sources: [String]~
+    prop notes: ?String
+
+    state visible: bool! = nay
+
+    rite render(self) -> Element {
+        div[
+            class: "evidentiality-tooltip-wrapper",
+            onmouseenter: || self.visible = yea,
+            onmouseleave: || self.visible = nay
+        ] {
+            // Trigger element
+            EvidentialityBadge { certainty: self.certainty.clone() }
+
+            // Tooltip content
+            ⎇ self.visible {
+                div[class: "tooltip-content"] {
+                    div[class: "tooltip-header"] {
+                        span[class: "field-name"] { self.field_name.clone() }
+                        EvidentialityBadge { certainty: self.certainty.clone() }
+                    }
+
+                    ⎇ !self.sources.is_empty() {
+                        div[class: "tooltip-sources"] {
+                            strong { "Sources:" }
+                            ul {
+                                ∀ source ∈ &self.sources {
+                                    li { source.clone() }
+                                }
+                            }
+                        }
+                    }
+
+                    ⎇ ≔ notes = &self.notes {
+                        div[class: "tooltip-notes"] {
+                            strong { "Notes:" }
+                            p { notes.clone() }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

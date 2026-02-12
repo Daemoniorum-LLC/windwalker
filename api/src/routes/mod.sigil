@@ -1,0 +1,101 @@
+//! API Routes
+//!
+//! Configures all API endpoints for the Windwalker server.
+
+☉ scroll treaties;
+☉ scroll tribes;
+☉ scroll search;
+☉ scroll geo;
+☉ scroll tiles;
+
+invoke sigil_http·{Server, Router};
+
+// ============================================================================
+// Route Configuration
+// ============================================================================
+
+/// Configures all API routes
+☉ rite configure_routes<S>(server: Server<S>) -> Server<S> {
+    server
+        // API v1 routes
+        .route("/api/v1/treaties", treaties::list_treaties)
+        .route("/api/v1/treaties/:id", treaties::get_treaty)
+        .route("/api/v1/treaties/:id/geometry", treaties::get_treaty_geometry)
+        .route("/api/v1/treaties/:id/articles", treaties::get_treaty_articles)
+        .route("/api/v1/treaties/:id/signatories", treaties::get_treaty_signatories)
+
+        .route("/api/v1/tribes", tribes::list_tribes)
+        .route("/api/v1/tribes/:id", tribes::get_tribe)
+        .route("/api/v1/tribes/:id/treaties", tribes::get_tribe_treaties)
+        .route("/api/v1/tribes/:id/territory", tribes::get_tribe_territory)
+
+        .route("/api/v1/search", search::search)
+        .route("/api/v1/suggest", search::suggest)
+
+        .route("/api/v1/geo/point", geo::query_point)
+        .route("/api/v1/geo/bbox", geo::query_bbox)
+
+        .route("/tiles/:layer/:z/:x/:y.mvt", tiles::get_tile)
+
+        // Health check
+        .route("/health", health_check)
+        .route("/api/v1/sources", list_sources)
+}
+
+// ============================================================================
+// Health Check
+// ============================================================================
+
+☉ async rite health_check(state: &AppState) -> Response {
+    // Check database connectivity
+    ≔ db_ok = state.db.check_connection().await.is_ok();
+
+    ⎇ db_ok {
+        Response::json(json!({
+            "status": "healthy",
+            "database": "connected",
+            "version": env!("CARGO_PKG_VERSION")
+        }))
+    } ⊸ {
+        Response::json(json!({
+            "status": "unhealthy",
+            "database": "disconnected"
+        })).status(503)
+    }
+}
+
+// ============================================================================
+// Data Sources
+// ============================================================================
+
+☉ async rite list_sources(state: &AppState) -> Response {
+    ≔ query = "
+        SELECT source_id, name, source_type::text, base_url,
+               last_scraped, reliability
+        FROM data_sources
+        ORDER BY reliability DESC
+    ";
+
+    ⌥ state.db.query(query, &[]).await {
+        Result·Ok(rows) => {
+            ≔ sources: Vec<serde_json::Value> = rows.iter().map(|row| {
+                json!({
+                    "id": row.get::<String>("source_id"),
+                    "name": row.get::<String>("name"),
+                    "type": row.get::<String>("source_type"),
+                    "baseUrl": row.get::<String>("base_url"),
+                    "lastScraped": row.get::<Option<String>>("last_scraped"),
+                    "reliability": row.get::<f64>("reliability")
+                })
+            }).collect();
+
+            Response::json(json!({ "sources": sources }))
+        },
+        Result·Err(e) => {
+            Response::json(json!({
+                "error": "Failed to fetch sources",
+                "details": format!("{}", e)
+            })).status(500)
+        },
+    }
+}

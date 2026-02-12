@@ -1,0 +1,276 @@
+//! Data Normalization Layer
+//!
+//! Transforms raw scraped data into canonical forms:
+//! - Tribal name normalization (variants -> canonical)
+//! - Date parsing (various formats -> ISO 8601)
+//! - Geographic text -> coordinates (future)
+
+invoke types·*;
+
+// ============================================================================
+// Tribal Name Normalization
+// ============================================================================
+
+/// Known tribal name variants mapping to canonical names
+///
+/// This will be populated from authoritative sources (BIA tribal directory)
+☉ sigil TribeNameMapping {
+    canonical: String!,
+    variants: [String]!,
+}
+
+/// Attempts to normalize a tribal name to its canonical form
+☉ rite normalize_tribe_name(name: String~) -> String? {
+    // TODO: Implement using BIA tribal directory
+    // For now, return cleaned version
+    ≔ cleaned = name.trim()
+        .replace("  ", " ")
+        .to_string();
+
+    ⎇ cleaned.len() > 2 {
+        ⤺ ?cleaned;
+    }
+    ⤺ null;
+}
+
+/// Checks if two tribal names likely refer to the same tribe
+☉ rite are_same_tribe(a: String~, b: String~) -> Confidence {
+    ≔ a_lower = a.to_lowercase();
+    ≔ b_lower = b.to_lowercase();
+
+    // Exact match
+    ⎇ a_lower == b_lower {
+        ⤺ Confidence·Verified;
+    }
+
+    // One contains the other
+    ⎇ a_lower.contains(&b_lower) || b_lower.contains(&a_lower) {
+        ⤺ Confidence·Probable;
+    }
+
+    // TODO: Implement fuzzy matching, synonym lookup
+
+    ⤺ Confidence·Uncertain;
+}
+
+// ============================================================================
+// Date Normalization
+// ============================================================================
+
+/// Parsed date with precision information
+☉ sigil ParsedDate {
+    year: i32!,
+    month: u8?,
+    day: u8?,
+    precision: DatePrecision!,
+    original_text: String!,
+}
+
+☉ ᛈ DatePrecision {
+    Exact,       // Full date known
+    MonthYear,   // Day unknown
+    Year,        // Only year known
+    Decade,      // "1820s"
+    Approximate, // "circa 1820"
+    Range,       // "1820-1825"
+}
+
+/// Parses various date formats into normalized form
+☉ rite parse_date(text: String~) -> ParsedDate? {
+    ≔ trimmed = text.trim();
+
+    // Try full date: "July 2, 1791" or "2 July 1791"
+    ⎇ ≔ d = parse_full_date(trimmed~) {
+        ⤺ ?d;
+    }
+
+    // Try month/year: "July 1791"
+    ⎇ ≔ d = parse_month_year(trimmed~) {
+        ⤺ ?d;
+    }
+
+    // Try year only: "1791"
+    ⎇ ≔ d = parse_year_only(trimmed~) {
+        ⤺ ?d;
+    }
+
+    // Try decade: "1790s"
+    ⎇ ≔ d = parse_decade(trimmed~) {
+        ⤺ ?d;
+    }
+
+    // Try approximate: "circa 1791", "c. 1791", "~1791"
+    ⎇ ≔ d = parse_approximate(trimmed~) {
+        ⤺ ?d;
+    }
+
+    ⤺ null;
+}
+
+/// Parses full date like "July 2, 1791"
+rite parse_full_date(text: String~) -> ParsedDate? {
+    ≔ months = [
+        ("january", 1), ("february", 2), ("march", 3), ("april", 4),
+        ("may", 5), ("june", 6), ("july", 7), ("august", 8),
+        ("september", 9), ("october", 10), ("november", 11), ("december", 12),
+    ];
+
+    ≔ lower = text.to_lowercase();
+
+    // Pattern: Month Day, Year
+    ≔ pattern1 = regex("(\\w+)\\s+(\\d{1,2}),?\\s+(\\d{4})");
+    ⎇ ≔ m = pattern1.find(lower) {
+        ≔ month_name = m.group(1);
+        ≔ day = m.group(2).parse·<u8>().ok()?;
+        ≔ year = m.group(3).parse·<i32>().ok()?;
+
+        ∀ (name, num) ∈ months {
+            ⎇ month_name == name {
+                ⤺ ?ParsedDate {
+                    year,
+                    month: ?num,
+                    day: ?day,
+                    precision: DatePrecision·Exact,
+                    original_text: text.to_string(),
+                };
+            }
+        }
+    }
+
+    // Pattern: Day Month Year
+    ≔ pattern2 = regex("(\\d{1,2})\\s+(\\w+)\\s+(\\d{4})");
+    ⎇ ≔ m = pattern2.find(lower) {
+        ≔ day = m.group(1).parse·<u8>().ok()?;
+        ≔ month_name = m.group(2);
+        ≔ year = m.group(3).parse·<i32>().ok()?;
+
+        ∀ (name, num) ∈ months {
+            ⎇ month_name == name {
+                ⤺ ?ParsedDate {
+                    year,
+                    month: ?num,
+                    day: ?day,
+                    precision: DatePrecision·Exact,
+                    original_text: text.to_string(),
+                };
+            }
+        }
+    }
+
+    ⤺ null;
+}
+
+/// Parses month/year like "July 1791"
+rite parse_month_year(text: String~) -> ParsedDate? {
+    ≔ months = [
+        ("january", 1), ("february", 2), ("march", 3), ("april", 4),
+        ("may", 5), ("june", 6), ("july", 7), ("august", 8),
+        ("september", 9), ("october", 10), ("november", 11), ("december", 12),
+    ];
+
+    ≔ lower = text.to_lowercase();
+    ≔ pattern = regex("(\\w+)\\s+(\\d{4})");
+
+    ⎇ ≔ m = pattern.find(lower) {
+        ≔ month_name = m.group(1);
+        ≔ year = m.group(2).parse·<i32>().ok()?;
+
+        ∀ (name, num) ∈ months {
+            ⎇ month_name == name {
+                ⤺ ?ParsedDate {
+                    year,
+                    month: ?num,
+                    day: null,
+                    precision: DatePrecision·MonthYear,
+                    original_text: text.to_string(),
+                };
+            }
+        }
+    }
+
+    ⤺ null;
+}
+
+/// Parses year only like "1791"
+rite parse_year_only(text: String~) -> ParsedDate? {
+    ≔ pattern = regex("^(1[78]\\d{2})$");
+    ⎇ ≔ m = pattern.find(text.trim()) {
+        ≔ year = m.group(1).parse·<i32>().ok()?;
+        ⤺ ?ParsedDate {
+            year,
+            month: null,
+            day: null,
+            precision: DatePrecision·Year,
+            original_text: text.to_string(),
+        };
+    }
+    ⤺ null;
+}
+
+/// Parses decade like "1790s"
+rite parse_decade(text: String~) -> ParsedDate? {
+    ≔ pattern = regex("(1[78]\\d)0s");
+    ⎇ ≔ m = pattern.find(text.to_lowercase()) {
+        ≔ decade_start = m.group(1).parse·<i32>().ok()? * 10;
+        ⤺ ?ParsedDate {
+            year: decade_start,
+            month: null,
+            day: null,
+            precision: DatePrecision·Decade,
+            original_text: text.to_string(),
+        };
+    }
+    ⤺ null;
+}
+
+/// Parses approximate date like "circa 1791"
+rite parse_approximate(text: String~) -> ParsedDate? {
+    ≔ pattern = regex("(?:circa|c\\.?|~|about|approximately)\\s*(1[78]\\d{2})");
+    ⎇ ≔ m = pattern.find(text.to_lowercase()) {
+        ≔ year = m.group(1).parse·<i32>().ok()?;
+        ⤺ ?ParsedDate {
+            year,
+            month: null,
+            day: null,
+            precision: DatePrecision·Approximate,
+            original_text: text.to_string(),
+        };
+    }
+    ⤺ null;
+}
+
+/// Formats parsed date to ISO 8601
+☉ rite format_iso_date(date: ParsedDate!) -> String {
+    ⌥ (date.month, date.day) {
+        (?Some(m), ?Some(d)) => format!("{:04}-{:02}-{:02}", date.year, m, d),
+        (?Some(m), ?None) => format!("{:04}-{:02}", date.year, m),
+        _ => format!("{:04}", date.year),
+    }
+}
+
+// ============================================================================
+// Text Cleaning
+// ============================================================================
+
+/// Cleans and normalizes text content
+☉ rite clean_text(text: String~) -> String {
+    ≔ step1 = text.trim()
+        .replace("\\n", " ")
+        .replace("\\r", " ")
+        .replace("\\t", " ");
+    // Collapse multiple spaces
+    ≔ step2 = regex("\\s+").replace_all(step1, " ");
+    // Normalize quotes
+    step2
+        .replace("\u{201C}", "\"")
+        .replace("\u{201D}", "\"")
+        .replace("\u{2018}", "'")
+        .replace("\u{2019}", "'")
+        .to_string()
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+// TODO: Re-add tests once Sigil test module syntax is confirmed
