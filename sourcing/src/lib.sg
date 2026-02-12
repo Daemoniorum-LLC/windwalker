@@ -1,0 +1,77 @@
+//! Windwalker Data Sourcing Pipeline
+//!
+//! This library provides infrastructure for scraping authoritative sources
+//! of Native American treaty data, ensuring every data point is traceable
+//! to its original source.
+//!
+//! # Architecture
+//!
+//! ```
+//! Source Adapters → Normalization → Validation → Staging DB → Human Review → Production
+//! ```
+//!
+//! # Sources
+//!
+//! - **Kappler** - Indian Affairs: Laws and Treaties (primary treaty text source)
+//! - **NARA** - National Archives (original documents, scans)
+//! - **BIA** - Bureau of Indian Affairs (tribal recognition, current status)
+//!
+//! # Evidentiality
+//!
+//! All data carries evidentiality markers:
+//! - `!` = verified (computed or cross-referenced)
+//! - `~` = reported (scraped from authoritative source)
+//! - `?` = uncertain (may not exist)
+//! - `‽` = paradox (conflicting sources)
+//!
+//! # Example
+//!
+//! ```sigil
+//! invoke windwalker_sourcing·sources·kappler;
+//! invoke windwalker_sourcing·pipeline·*;
+//!
+//! async rite main() {
+//!     // Fetch treaty index from Kappler
+//!     ≔ config = default_scrape_config();
+//!     ≔ index = kappler·fetch_treaty_index(config).await;
+//!
+//!     // Process each treaty
+//!     ⌥ index {
+//!         ScrapeResult·Ok { data, .. } => {
+//!             ∀ entry in data {
+//!                 println("Found: {}", entry.title);
+//!             }
+//!         },
+//!         ScrapeResult·NetworkError { message } => {
+//!             eprintln("Network error: {}", message);
+//!         },
+//!         _ => {}
+//!     }
+//! }
+//! ```
+
+// ============================================================================
+// Module Declarations
+// ============================================================================
+
+/// Core type definitions
+pub mod types;
+
+/// Source adapters for authoritative data sources
+pub mod sources;
+
+/// Data normalization and cleaning
+pub mod normalize;
+
+/// Validation rules and cross-referencing
+pub mod validate;
+
+/// Pipeline orchestration
+pub mod pipeline;
+
+// ============================================================================
+// Re-exports for convenience
+// ============================================================================
+
+pub invoke types·*;
+pub invoke sources·{ScrapeConfig, ScrapeResult, default_scrape_config};

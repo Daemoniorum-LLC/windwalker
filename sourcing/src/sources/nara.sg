@@ -1,0 +1,427 @@
+//! National Archives and Records Administration (NARA) API Client
+//!
+//! NARA provides official treaty documents, scanned images, and metadata.
+//! Unlike Kappler (which is OCR'd text), NARA has original document scans.
+//!
+//! API: https://catalog.archives.gov/api/v1/
+//! Documentation: https://github.com/usnationalarchives/Catalog-API
+//!
+//! Record Group 11 contains Indian Treaties
+
+invoke crate·types·*;
+invoke crate·sources·*;
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+≔ BASE_URL: !&str = "https://catalog.archives.gov/api/v1/";
+≔ SOURCE_ID: !&str = "nara";
+≔ SOURCE_NAME: !&str = "National Archives and Records Administration";
+≔ RECORD_GROUP_TREATIES: !&str = "11";  // RG 11 = Indian Treaties
+
+// ============================================================================
+// Source Info
+// ============================================================================
+
+/// Returns metadata about NARA as a data source
+rite source_info() → !DataSource {
+    ⤺ DataSource {
+        id: SourceId { value: SOURCE_ID.to_string() },
+        source_type: SourceType·NARA,
+        name: SOURCE_NAME.to_string(),
+        base_url: BASE_URL.to_string(),
+        last_scraped: null,
+        reliability: 0.99,  // Highest - original documents
+    };
+}
+
+/// Returns coverage information for NARA
+rite coverage() → !SourceCoverage {
+    ⤺ SourceCoverage {
+        treaty_count: ?400,  // Includes originals + ratified copies
+        tribe_count: null,
+        date_range: ?("1778", "1871"),
+        geographic_scope: ?"United States",
+        source_last_updated: ?"Continuously updated",
+    };
+}
+
+// ============================================================================
+// API Types
+// ============================================================================
+
+/// NARA API search response
+sigil NaraSearchResponse {
+    total: !u64,
+    rows: ![NaraResult],
+}
+
+/// Individual result from NARA API
+sigil NaraResult {
+    nara_id: !String,
+    title: ~String,
+    description: ?String,
+    record_group: ?String,
+    series: ?String,
+    date_range: ?String,
+    digital_objects: ?[NaraDigitalObject],
+}
+
+/// Digital object (scan, PDF, etc.)
+sigil NaraDigitalObject {
+    object_id: !String,
+    mime_type: ?String,
+    url: !String,
+    description: ?String,
+}
+
+// ============================================================================
+// API Client
+// ============================================================================
+
+/// Searches NARA catalog for treaty-related records
+async rite search_treaties(
+    query: !String,
+    config: !ScrapeConfig,
+) → ScrapeResult<[RawArchiveRecord]> {
+    // Build search URL
+    // API: /search?q={query}&f.recordGroup={rg}
+    ≔ url = format!(
+        "{}search?q={}&f.recordGroup={}&rows=50",
+        BASE_URL,
+        url_encode(query),
+        RECORD_GROUP_TREATIES,
+    );
+
+    // Respectful delay
+    sleep(config.min_delay_ms).await;
+
+    // Make API request
+    ≔ response = ⌥ http·get(url)
+        .header("User-Agent", config.user_agent)
+        .header("Accept", "application/json")
+        .timeout(30000)
+        .await {
+        Response·Ok(r) => r,
+        Response·Timeout => ⤺ ScrapeResult·NetworkError {
+            message: "Timeout calling NARA API".to_string(),
+        },
+        Response·Err(e) => ⤺ ScrapeResult·NetworkError {
+            message: format!("Network error: {}", e),
+        },
+    };
+
+    ⎇ response.status != 200 {
+        ⤺ ScrapeResult·NetworkError {
+            message: format!("NARA API returned HTTP {}", response.status),
+        };
+    }
+
+    // Parse JSON response
+    ≔ json = response.text().await;
+    ≔ parsed = ⌥ parse_search_response(json~) {
+        Result·Ok(r) => r,
+        Result·Err(e) => ⤺ ScrapeResult·ParseError {
+            message: e,
+            raw: ?json,
+        },
+    };
+
+    // Convert to our types
+    ≔ records = parsed.rows
+        |τ{result => nara_result_to_archive_record(result)}
+        |collect;
+
+    ⤺ ScrapeResult·Ok { data: records, cached: nay };
+}
+
+/// Fetches a specific NARA record by ID
+async rite fetch_record(
+    nara_id: !String,
+    config: !ScrapeConfig,
+) → ScrapeResult<RawArchiveRecord> {
+    ≔ url = format!("{}records/{}", BASE_URL, nara_id);
+
+    sleep(config.min_delay_ms).await;
+
+    ≔ response = ⌥ http·get(url.clone())
+        .header("User-Agent", config.user_agent)
+        .header("Accept", "application/json")
+        .timeout(30000)
+        .await {
+        Response·Ok(r) => r,
+        Response·Timeout => ⤺ ScrapeResult·NetworkError {
+            message: "Timeout fetching NARA record".to_string(),
+        },
+        Response·Err(e) => ⤺ ScrapeResult·NetworkError {
+            message: format!("Network error: {}", e),
+        },
+    };
+
+    ⎇ response.status == 404 {
+        ⤺ ScrapeResult·NotFound;
+    }
+
+    ⎇ response.status != 200 {
+        ⤺ ScrapeResult·NetworkError {
+            message: format!("HTTP {}", response.status),
+        };
+    }
+
+    ≔ json = response.text().await;
+    ≔ result = ⌥ parse_record_response(json~) {
+        Result·Ok(r) => r,
+        Result·Err(e) => ⤺ ScrapeResult·ParseError {
+            message: e,
+            raw: ?json,
+        },
+    };
+
+    ⤺ ScrapeResult·Ok {
+        data: nara_result_to_archive_record(result),
+        cached: nay,
+    };
+}
+
+/// Fetches digital object metadata
+async rite fetch_digital_objects(
+    nara_id: !String,
+    config: !ScrapeConfig,
+) → ScrapeResult<[NaraDigitalObject]> {
+    ≔ url = format!("{}records/{}/objects", BASE_URL, nara_id);
+
+    sleep(config.min_delay_ms).await;
+
+    ≔ response = ⌥ http·get(url)
+        .header("User-Agent", config.user_agent)
+        .header("Accept", "application/json")
+        .timeout(30000)
+        .await {
+        Response·Ok(r) => r,
+        Response·Timeout => ⤺ ScrapeResult·NetworkError {
+            message: "Timeout fetching digital objects".to_string(),
+        },
+        Response·Err(e) => ⤺ ScrapeResult·NetworkError {
+            message: format!("Network error: {}", e),
+        },
+    };
+
+    ⎇ response.status != 200 {
+        ⤺ ScrapeResult·NetworkError {
+            message: format!("HTTP {}", response.status),
+        };
+    }
+
+    ≔ json = response.text().await;
+    ≔ objects = ⌥ parse_digital_objects(json~) {
+        Result·Ok(o) => o,
+        Result·Err(e) => ⤺ ScrapeResult·ParseError {
+            message: e,
+            raw: ?json,
+        },
+    };
+
+    ⤺ ScrapeResult·Ok { data: objects, cached: nay };
+}
+
+// ============================================================================
+// Response Parsing
+// ============================================================================
+
+/// Parses NARA search API response
+rite parse_search_response(json: ~String) → Result<NaraSearchResponse, String> {
+    // Parse JSON
+    ≔ parsed = ⌥ json·parse(json) {
+        Result·Ok(v) => v,
+        Result·Err(e) => ⤺ Result·Err(format!("JSON parse error: {}", e)),
+    };
+
+    // Extract results
+    ≔ total = parsed["opaResponse"]["totalRows"].as_u64().unwrap_or(0);
+    ≔ rows_json = parsed["opaResponse"]["results"].as_array();
+
+    ≔ vary rows: [NaraResult] = [];
+
+    ⎇ ≔ arr = rows_json {
+        ∀ item in arr {
+            ⎇ ≔ result = parse_nara_result(item) {
+                rows.push(result);
+            }
+        }
+    }
+
+    ⤺ Result·Ok(NaraSearchResponse { total, rows });
+}
+
+/// Parses a single NARA record response
+rite parse_record_response(json: ~String) → Result<NaraResult, String> {
+    ≔ parsed = ⌥ json·parse(json) {
+        Result·Ok(v) => v,
+        Result·Err(e) => ⤺ Result·Err(format!("JSON parse error: {}", e)),
+    };
+
+    ≔ record = &parsed["opaResponse"]["result"];
+    parse_nara_result(record)
+        .ok_or("Failed to parse NARA record".to_string())
+}
+
+/// Parses a NARA result item
+rite parse_nara_result(item: &JsonValue) → ?NaraResult {
+    ≔ nara_id = item["naId"].as_str()?.to_string();
+    ≔ title = item["title"].as_str()
+        .unwrap_or("Untitled")
+        .to_string();
+
+    ⤺ ?NaraResult {
+        nara_id: nara_id,
+        title: title~,
+        description: item["scopeAndContentNote"].as_str().map(|s| s.to_string()),
+        record_group: item["recordGroup"]["title"].as_str().map(|s| s.to_string()),
+        series: item["series"]["title"].as_str().map(|s| s.to_string()),
+        date_range: item["inclusiveDates"].as_str().map(|s| s.to_string()),
+        digital_objects: null,  // Fetched separately
+    };
+}
+
+/// Parses digital objects response
+rite parse_digital_objects(json: ~String) → Result<[NaraDigitalObject], String> {
+    ≔ parsed = ⌥ json·parse(json) {
+        Result·Ok(v) => v,
+        Result·Err(e) => ⤺ Result·Err(format!("JSON parse error: {}", e)),
+    };
+
+    ≔ vary objects: [NaraDigitalObject] = [];
+    ≔ items = parsed["opaResponse"]["objects"].as_array();
+
+    ⎇ ≔ arr = items {
+        ∀ item in arr {
+            ⎇ ≔ obj_id = item["objectId"].as_str() {
+                objects.push(NaraDigitalObject {
+                    object_id: obj_id.to_string(),
+                    mime_type: item["mimeType"].as_str().map(|s| s.to_string()),
+                    url: item["objectUrl"].as_str()
+                        .unwrap_or("")
+                        .to_string(),
+                    description: item["description"].as_str().map(|s| s.to_string()),
+                });
+            }
+        }
+    }
+
+    ⤺ Result·Ok(objects);
+}
+
+// ============================================================================
+// Type Conversion
+// ============================================================================
+
+/// Converts NARA result to our RawArchiveRecord type
+rite nara_result_to_archive_record(result: NaraResult) → RawArchiveRecord {
+    ⤺ RawArchiveRecord {
+        source: source_info(),
+        source_url: format!("https://catalog.archives.gov/id/{}", result.nara_id),
+        scraped_at: DateTime·now(),
+
+        nara_id: result.nara_id,
+        record_group: result.record_group,
+        series: result.series,
+
+        title: result.title,
+        description: result.description,
+
+        date_range_text: result.date_range,
+
+        digital_object_urls: result.digital_objects
+            .map(|objs| objs|τ{o => o.url}|collect)
+            .unwrap_or([])~,
+    };
+}
+
+// ============================================================================
+// Source Adapter Interface
+// ============================================================================
+
+/// Fetches treaty index from NARA
+async rite fetch_treaty_index(config: !ScrapeConfig) → ScrapeResult<[TreatyIndexEntry]> {
+    // Search for Indian treaties in Record Group 11
+    ≔ results = search_treaties("indian treaty", config).await;
+
+    ≔ records = ⌥ results {
+        ScrapeResult·Ok { data, .. } => data,
+        other => ⤺ other,  // Propagate errors
+    };
+
+    // Convert to index entries
+    ≔ entries = records
+        |τ{r => TreatyIndexEntry {
+            id: format!("nara-{}", r.nara_id),
+            title: r.title,
+            date: r.date_range_text,
+            tribes: []~,  // Would need to parse from title/description
+            url: r.source_url,
+        }}
+        |collect;
+
+    ⤺ ScrapeResult·Ok { data: entries, cached: nay };
+}
+
+/// Fetches a single treaty (not directly supported - NARA has records, not treaties)
+async rite fetch_treaty(id: !String, config: !ScrapeConfig) → ScrapeResult<RawTreaty> {
+    // NARA doesn't have structured treaty data like Kappler
+    // We return archive records instead
+    ⤺ ScrapeResult·ParseError {
+        message: "NARA provides archive records, not structured treaties. Use fetch_record instead.".to_string(),
+        raw: null,
+    };
+}
+
+/// Searches NARA
+async rite search(query: !String, config: !ScrapeConfig) → ScrapeResult<[SearchHit]> {
+    ≔ results = search_treaties(query, config).await;
+
+    ≔ records = ⌥ results {
+        ScrapeResult·Ok { data, .. } => data,
+        ScrapeResult·RateLimited { retry_after_ms } =>
+            ⤺ ScrapeResult·RateLimited { retry_after_ms },
+        ScrapeResult·NetworkError { message } =>
+            ⤺ ScrapeResult·NetworkError { message },
+        ScrapeResult·ParseError { message, raw } =>
+            ⤺ ScrapeResult·ParseError { message, raw },
+        ScrapeResult·NotFound =>
+            ⤺ ScrapeResult·Ok { data: [], cached: nay },
+    };
+
+    ≔ hits = records
+        |τ{r => SearchHit {
+            entity_type: "archive_record".to_string(),
+            id: format!("nara-{}", r.nara_id),
+            title: r.title,
+            snippet: r.description,
+            url: r.source_url,
+            score: 0.7,  // NARA results are authoritative
+        }}
+        |collect;
+
+    ⤺ ScrapeResult·Ok { data: hits, cached: nay };
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    invoke super·*;
+
+    rite test_source_info() {
+        ≔ info = source_info();
+        assert_eq(info.source_type, SourceType·NARA);
+        assert(info.reliability > 0.95);
+    }
+
+    rite test_coverage() {
+        ≔ cov = coverage();
+        assert(cov.treaty_count.unwrap_or(0) > 300);
+    }
+}

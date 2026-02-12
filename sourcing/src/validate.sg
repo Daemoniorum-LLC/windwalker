@@ -1,0 +1,330 @@
+//! Validation and Cross-Reference Layer
+//!
+//! Validates scraped data against:
+//! - Schema requirements (required fields, formats)
+//! - Cross-source verification (Kappler vs NARA agreement)
+//! - Historical plausibility (dates, locations)
+
+invoke crate·types·*;
+invoke crate·normalize·*;
+
+// ============================================================================
+// Treaty Validation
+// ============================================================================
+
+/// Validates a raw treaty record
+rite validate_treaty(treaty: !RawTreaty) → !ValidationResult {
+    ≔ vary errors: [ValidationError] = [];
+    ≔ vary warnings: [ValidationWarning] = [];
+
+    // Required: title
+    ⎇ treaty.title.trim().is_empty() {
+        errors.push(ValidationError {
+            field: "title".to_string(),
+            message: "Treaty must have a title".to_string(),
+            error_type: ValidationErrorType·MissingRequired,
+        });
+    }
+
+    // Recommended: signed date
+    ⎇ treaty.date_signed_text.is_none() {
+        warnings.push(ValidationWarning {
+            field: "date_signed_text".to_string(),
+            message: "Treaty should have a signed date".to_string(),
+            warning_type: ValidationWarningType·MissingRecommended,
+        });
+    }
+
+    // Validate date if present
+    ⎇ ≔ date_text = &treaty.date_signed_text {
+        ⎇ parse_date(date_text.clone()~).is_none() {
+            warnings.push(ValidationWarning {
+                field: "date_signed_text".to_string(),
+                message: format!("Could not parse date: {}", date_text),
+                warning_type: ValidationWarningType·UnusualValue,
+            });
+        }
+    }
+
+    // Validate date sequence if ratified date present
+    ⎇ ≔ signed = &treaty.date_signed_text {
+        ⎇ ≔ ratified = &treaty.date_ratified_text {
+            ≔ signed_date = parse_date(signed.clone()~);
+            ≔ ratified_date = parse_date(ratified.clone()~);
+
+            ⎇ ≔ (s, r) = (signed_date, ratified_date) {
+                ⎇ s.year > r.year {
+                    errors.push(ValidationError {
+                        field: "date_ratified_text".to_string(),
+                        message: "Ratification date cannot be before signing date".to_string(),
+                        error_type: ValidationErrorType·InvalidFormat,
+                    });
+                }
+            }
+        }
+    }
+
+    // Recommended: at least one tribal party
+    ⎇ treaty.tribal_parties_text.is_empty() {
+        warnings.push(ValidationWarning {
+            field: "tribal_parties_text".to_string(),
+            message: "Treaty should list tribal parties".to_string(),
+            warning_type: ValidationWarningType·MissingRecommended,
+        });
+    }
+
+    // Check for suspiciously short content
+    ⎇ treaty.articles_text.len() < 1 {
+        warnings.push(ValidationWarning {
+            field: "articles_text".to_string(),
+            message: "Treaty has no articles - may be incomplete".to_string(),
+            warning_type: ValidationWarningType·LowConfidence,
+        });
+    }
+
+    // Historical plausibility: treaty dates 1778-1871
+    ⎇ ≔ date_text = &treaty.date_signed_text {
+        ⎇ ≔ date = parse_date(date_text.clone()~) {
+            ⎇ date.year < 1778 ∨ date.year > 1871 {
+                warnings.push(ValidationWarning {
+                    field: "date_signed_text".to_string(),
+                    message: format!(
+                        "Date {} outside US treaty-making period (1778-1871)",
+                        date.year
+                    ),
+                    warning_type: ValidationWarningType·UnusualValue,
+                });
+            }
+        }
+    }
+
+    ⤺ ValidationResult {
+        is_valid: errors.is_empty(),
+        errors,
+        warnings,
+    };
+}
+
+// ============================================================================
+// Cross-Reference Validation
+// ============================================================================
+
+/// Result of cross-referencing an entity across sources
+sigil CrossRefResult {
+    /// Number of sources that have this entity
+    source_count: !u64,
+
+    /// Sources that agree on key facts
+    agreeing_sources: ![DataSource],
+
+    /// Detected conflicts between sources
+    conflicts: ![ConflictRecord],
+
+    /// Overall confidence after cross-referencing
+    confidence: !Confidence,
+}
+
+/// Cross-references a treaty across multiple sources
+rite cross_reference_treaty(
+    kappler: ?RawTreaty,
+    nara: ?RawArchiveRecord,
+) → CrossRefResult {
+    ≔ vary agreeing: [DataSource] = [];
+    ≔ vary conflicts: [ConflictRecord] = [];
+    ≔ source_count = (kappler.is_some() as u64) + (nara.is_some() as u64);
+
+    // If only one source, can't cross-reference
+    ⎇ source_count < 2 {
+        ⤺ CrossRefResult {
+            source_count,
+            agreeing_sources: [],
+            conflicts: [],
+            confidence: ⎇ source_count == 1 {
+                Confidence·Authoritative
+            } ⎉ {
+                Confidence·Uncertain
+            },
+        };
+    }
+
+    // Compare titles (fuzzy match)
+    ⎇ ≔ (k, n) = (kappler.as_ref(), nara.as_ref()) {
+        ≔ k_title = k.title.to_lowercase();
+        ≔ n_title = n.title.to_lowercase();
+
+        ⎇ titles_match(k_title~, n_title~) {
+            agreeing.push(k.source.clone());
+            agreeing.push(n.source.clone());
+        } ⎉ {
+            conflicts.push(ConflictRecord {
+                entity_type: "treaty".to_string(),
+                entity_id: format!("kappler-v2-p{}", k.kappler_page.unwrap_or(0)),
+                field: "title".to_string(),
+                versions: [
+                    ConflictVersion {
+                        value: k.title.clone(),
+                        source: k.source.clone(),
+                        confidence: Confidence·Authoritative,
+                    },
+                    ConflictVersion {
+                        value: n.title.clone(),
+                        source: n.source.clone(),
+                        confidence: Confidence·Authoritative,
+                    },
+                ],
+                resolution: null,
+            });
+        }
+
+        // TODO: Compare dates, parties, etc.
+    }
+
+    ≔ confidence = ⎇ conflicts.is_empty() {
+        Confidence·Verified
+    } ⎉ ⎇ conflicts.len() == 1 {
+        Confidence·Probable
+    } ⎉ {
+        Confidence·Disputed
+    };
+
+    ⤺ CrossRefResult {
+        source_count,
+        agreeing_sources: agreeing,
+        conflicts,
+        confidence,
+    };
+}
+
+/// Checks if two treaty titles likely match
+rite titles_match(a: ~String, b: ~String) → bool {
+    // Exact match
+    ⎇ a == b {
+        ⤺ yea;
+    }
+
+    // One contains the other
+    ⎇ a.contains(&b) ∨ b.contains(&a) {
+        ⤺ yea;
+    }
+
+    // TODO: Implement fuzzy matching (Levenshtein distance, etc.)
+
+    ⤺ nay;
+}
+
+// ============================================================================
+// Review Queue Management
+// ============================================================================
+
+/// Determines if a treaty needs human review
+rite needs_review(treaty: !RawTreaty, validation: !ValidationResult) → ?ReviewItem {
+    // Validation failed
+    ⎇ !validation.is_valid {
+        ⤺ ?ReviewItem {
+            id: generate_review_id(),
+            entity_type: "treaty".to_string(),
+            raw_data: json·stringify(treaty)~,
+            trigger: ReviewTrigger·ValidationFailed,
+            priority: Priority·High,
+            sources_consulted: [treaty.source.clone()],
+            conflicts: null,
+            status: ReviewStatus·Pending,
+            assigned_to: null,
+            resolution: null,
+            resolution_notes: null,
+            resolved_by: null,
+            resolved_at: null,
+        };
+    }
+
+    // Too many warnings
+    ⎇ validation.warnings.len() > 3 {
+        ⤺ ?ReviewItem {
+            id: generate_review_id(),
+            entity_type: "treaty".to_string(),
+            raw_data: json·stringify(treaty)~,
+            trigger: ReviewTrigger·LowConfidenceMatch,
+            priority: Priority·Medium,
+            sources_consulted: [treaty.source.clone()],
+            conflicts: null,
+            status: ReviewStatus·Pending,
+            assigned_to: null,
+            resolution: null,
+            resolution_notes: null,
+            resolved_by: null,
+            resolved_at: null,
+        };
+    }
+
+    // No tribal parties identified
+    ⎇ treaty.tribal_parties_text.is_empty() {
+        ⤺ ?ReviewItem {
+            id: generate_review_id(),
+            entity_type: "treaty".to_string(),
+            raw_data: json·stringify(treaty)~,
+            trigger: ReviewTrigger·UnknownName,
+            priority: Priority·Medium,
+            sources_consulted: [treaty.source.clone()],
+            conflicts: null,
+            status: ReviewStatus·Pending,
+            assigned_to: null,
+            resolution: null,
+            resolution_notes: null,
+            resolved_by: null,
+            resolved_at: null,
+        };
+    }
+
+    ⤺ null;
+}
+
+/// Generates a unique review item ID
+rite generate_review_id() → !String {
+    format!("review-{}", uuid·v4())
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    invoke super·*;
+    invoke crate·sources·kappler;
+
+    rite test_validate_empty_title() {
+        ≔ treaty = RawTreaty {
+            source: kappler·source_info(),
+            source_url: "test".to_string(),
+            scraped_at: DateTime·now(),
+            kappler_volume: ?2,
+            kappler_page: ?1,
+            title: ""~,
+            date_signed_text: null,
+            date_ratified_text: null,
+            date_proclaimed_text: null,
+            tribal_parties_text: []~,
+            us_commissioners_text: []~,
+            preamble: null,
+            articles_text: []~,
+            signatures_text: []~,
+            statutes_at_large_citation: null,
+            raw_html: "".to_string(),
+        };
+
+        ≔ result = validate_treaty(treaty);
+        assert(!result.is_valid);
+        assert(result.errors.len() > 0);
+    }
+
+    rite test_titles_match() {
+        assert(titles_match(
+            "Treaty with the Cherokee".to_string()~,
+            "treaty with the cherokee".to_string()~,
+        ));
+        assert(titles_match(
+            "Treaty with the Cherokee, 1791".to_string()~,
+            "Treaty with the Cherokee".to_string()~,
+        ));
+    }
+}

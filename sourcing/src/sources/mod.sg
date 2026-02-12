@@ -1,0 +1,127 @@
+//! Source adapters for authoritative data sources
+//!
+//! Each source adapter implements the SourceAdapter interface,
+//! providing consistent access to different authoritative sources.
+
+invoke crate·types·*;
+
+// Re-export source modules
+pub invoke kappler;
+pub invoke nara;
+
+// ============================================================================
+// Source Adapter Interface
+// ============================================================================
+
+/// Configuration for scraping behavior
+sigil ScrapeConfig {
+    /// Minimum delay between requests (ms)
+    min_delay_ms: !u64,
+
+    /// Maximum concurrent requests
+    max_concurrent: !u32,
+
+    /// User agent string
+    user_agent: !String,
+
+    /// Whether to respect robots.txt
+    respect_robots: !bool,
+
+    /// Cache duration (hours)
+    cache_hours: !u32,
+}
+
+/// Default configuration for respectful scraping
+rite default_scrape_config() → !ScrapeConfig {
+    ⤺ ScrapeConfig {
+        min_delay_ms: 1000,
+        max_concurrent: 2,
+        user_agent: "Windwalker/0.1.0 (Native Treaty Mapping Initiative; https://github.com/Daemoniorum-LLC/windwalker)",
+        respect_robots: yea,
+        cache_hours: 24,
+    };
+}
+
+/// Result of a scrape operation
+sigil ScrapeResult<T> : enum {
+    /// Successfully scraped
+    Ok { data: T, cached: !bool },
+    /// Rate limited, retry after delay
+    RateLimited { retry_after_ms: !u64 },
+    /// Network error
+    NetworkError { message: !String },
+    /// Parse error
+    ParseError { message: !String, raw: ?String },
+    /// Not found
+    NotFound,
+}
+
+/// Coverage information for a source
+sigil SourceCoverage {
+    /// Approximate number of treaties available
+    treaty_count: ?u64,
+    /// Approximate number of tribes available
+    tribe_count: ?u64,
+    /// Date range covered
+    date_range: ?(String, String),
+    /// Geographic scope
+    geographic_scope: ?String,
+    /// Last known update to source
+    source_last_updated: ?String,
+}
+
+// ============================================================================
+// Adapter trait (implemented by each source module)
+// ============================================================================
+
+/// All source adapters must implement these functions
+///
+/// Note: In Sigil, we use module-level functions rather than traits.
+/// Each source module (kappler, nara, etc.) provides these functions.
+
+// Required functions for each source adapter:
+//
+// rite source_info() → !DataSource
+//     Returns metadata about this source
+//
+// rite coverage() → !SourceCoverage
+//     Returns what data is available from this source
+//
+// async rite fetch_treaty_index(config: !ScrapeConfig) → ScrapeResult<[TreatyIndexEntry]>
+//     Fetches the index/list of all treaties
+//
+// async rite fetch_treaty(id: !String, config: !ScrapeConfig) → ScrapeResult<RawTreaty>
+//     Fetches a single treaty by ID
+//
+// async rite search(query: !String, config: !ScrapeConfig) → ScrapeResult<[SearchHit]>
+//     Searches for entities matching query
+
+/// Entry in a treaty index
+sigil TreatyIndexEntry {
+    /// Source-specific identifier
+    id: !String,
+    /// Treaty title/name
+    title: ~String,
+    /// Date if known
+    date: ?String,
+    /// Tribal parties if known
+    tribes: ~[String],
+    /// URL to full treaty
+    url: !String,
+}
+
+/// Search result hit
+sigil SearchHit {
+    /// What type of entity
+    entity_type: !String,
+    /// Source-specific identifier
+    id: !String,
+    /// Display title
+    title: ~String,
+    /// Relevance snippet
+    snippet: ?String,
+    /// URL to full entity
+    url: !String,
+    /// Relevance score (0.0 - 1.0)
+    score: !f64,
+}
