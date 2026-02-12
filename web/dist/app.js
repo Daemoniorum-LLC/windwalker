@@ -695,8 +695,10 @@ function filterBoundariesByYear(maxYear) {
         type: 'FeatureCollection',
         features: boundariesGeoJSON.features.filter(feature => {
             const year = extractYearFromName(feature.properties.Name || '');
-            // Include if no year found (unknown date) or year <= maxYear
-            return year === null || year <= maxYear;
+            // At max year (1871), show all boundaries
+            if (maxYear >= 1871) return true;
+            // Otherwise, only show boundaries with confirmed year <= maxYear
+            return year !== null && year <= maxYear;
         })
     };
 
