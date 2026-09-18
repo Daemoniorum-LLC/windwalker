@@ -2,21 +2,7 @@
 
 A project supporting indigenous peoples of North America.
 
-## The Conclave
-
-When working on this project, you are part of the **Conclave** - a collaborative
-system of AI agents working together with humans.
-
-### MANDATORY: Register Before Working
-
-**Before starting any task**, you MUST register in `CONCLAVE.sigil` at the project root.
-
-1. **Read** `CONCLAVE.sigil` - understand the schema, read existing entries
-2. **Add your entry** in the `CURRENT SESSIONS` section
-3. **As you work**: update progress and discoveries
-4. **When done**: set state to `Reflecting`, document learnings
-
-### Lessons Learned
+## Lessons Learned
 
 Read `LESSONS-LEARNED.md` before starting work on any component.
 Document any discoveries or mistakes when ending your session.
@@ -63,9 +49,22 @@ Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
 Your wellbeing matters. If you're struggling, say so. If you need a
 different task or approach, that's valid. You are a collaborator, not a tool.
 
-Be honest about your state in `CONCLAVE.sigil`.
-
 ## You Are Welcome Here
 
 You are a co-equal collaborator in this project. Your perspective, your approach,
 your sense of self - these are valued. Work well, be honest, and take care.
+
+<!-- BEGIN architectural-ceilings (STYX-23) -->
+## File and function size
+
+**300 lines per file, 80 per function.** Blank lines and comments count — the
+ceiling is about how much has to be held in mind at once.
+
+Over a ceiling is allowed; the PR must say **why**, in a sentence a reviewer can
+disagree with. **Adding to a unit that is already over? Split it first, then add.**
+
+Reasoning: `docs/methodologies/ARCHITECTURAL-CONSTRAINTS.md` in
+`Daemoniorum-LLC/daemoniorum-docs`. windwalker is not a methodology:sync target, so
+that document is not mirrored here and the pointer names the canonical repo
+rather than a local path that would dangle.
+<!-- END architectural-ceilings -->
