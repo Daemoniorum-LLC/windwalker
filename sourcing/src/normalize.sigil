@@ -20,7 +20,7 @@ invoke types·*;
 }
 
 /// Attempts to normalize a tribal name to its canonical form
-☉ rite normalize_tribe_name(name: String~) -> String? {
+☉ rite normalize_tribe_name(name: String~) -> ?String {
     // TODO: Implement using BIA tribal directory
     // For now, return cleaned version
     ≔ cleaned = name.trim()
@@ -76,7 +76,7 @@ invoke types·*;
 }
 
 /// Parses various date formats into normalized form
-☉ rite parse_date(text: String~) -> ParsedDate? {
+☉ rite parse_date(text: String~) -> ?ParsedDate {
     ≔ trimmed = text.trim();
 
     // Try full date: "July 2, 1791" or "2 July 1791"
@@ -108,7 +108,7 @@ invoke types·*;
 }
 
 /// Parses full date like "July 2, 1791"
-rite parse_full_date(text: String~) -> ParsedDate? {
+rite parse_full_date(text: String~) -> ?ParsedDate {
     ≔ months = [
         ("january", 1), ("february", 2), ("march", 3), ("april", 4),
         ("may", 5), ("june", 6), ("july", 7), ("august", 8),
@@ -161,7 +161,7 @@ rite parse_full_date(text: String~) -> ParsedDate? {
 }
 
 /// Parses month/year like "July 1791"
-rite parse_month_year(text: String~) -> ParsedDate? {
+rite parse_month_year(text: String~) -> ?ParsedDate {
     ≔ months = [
         ("january", 1), ("february", 2), ("march", 3), ("april", 4),
         ("may", 5), ("june", 6), ("july", 7), ("august", 8),
@@ -192,7 +192,7 @@ rite parse_month_year(text: String~) -> ParsedDate? {
 }
 
 /// Parses year only like "1791"
-rite parse_year_only(text: String~) -> ParsedDate? {
+rite parse_year_only(text: String~) -> ?ParsedDate {
     ≔ pattern = regex("^(1[78]\\d{2})$");
     ⎇ ≔ m = pattern.find(text.trim()) {
         ≔ year = m.group(1).parse·<i32>().ok()?;
@@ -208,7 +208,7 @@ rite parse_year_only(text: String~) -> ParsedDate? {
 }
 
 /// Parses decade like "1790s"
-rite parse_decade(text: String~) -> ParsedDate? {
+rite parse_decade(text: String~) -> ?ParsedDate {
     ≔ pattern = regex("(1[78]\\d)0s");
     ⎇ ≔ m = pattern.find(text.to_lowercase()) {
         ≔ decade_start = m.group(1).parse·<i32>().ok()? * 10;
@@ -224,7 +224,7 @@ rite parse_decade(text: String~) -> ParsedDate? {
 }
 
 /// Parses approximate date like "circa 1791"
-rite parse_approximate(text: String~) -> ParsedDate? {
+rite parse_approximate(text: String~) -> ?ParsedDate {
     ≔ pattern = regex("(?:circa|c\\.?|~|about|approximately)\\s*(1[78]\\d{2})");
     ⎇ ≔ m = pattern.find(text.to_lowercase()) {
         ≔ year = m.group(1).parse·<i32>().ok()?;
