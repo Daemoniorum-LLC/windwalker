@@ -80,27 +80,27 @@ invoke types·*;
     ≔ trimmed = text.trim();
 
     // Try full date: "July 2, 1791" or "2 July 1791"
-    ⎇ ≔ d = parse_full_date(trimmed~) {
+    ⌐ ?d = parse_full_date(trimmed~) {
         ⤺ ?d;
     }
 
     // Try month/year: "July 1791"
-    ⎇ ≔ d = parse_month_year(trimmed~) {
+    ⌐ ?d = parse_month_year(trimmed~) {
         ⤺ ?d;
     }
 
     // Try year only: "1791"
-    ⎇ ≔ d = parse_year_only(trimmed~) {
+    ⌐ ?d = parse_year_only(trimmed~) {
         ⤺ ?d;
     }
 
     // Try decade: "1790s"
-    ⎇ ≔ d = parse_decade(trimmed~) {
+    ⌐ ?d = parse_decade(trimmed~) {
         ⤺ ?d;
     }
 
     // Try approximate: "circa 1791", "c. 1791", "~1791"
-    ⎇ ≔ d = parse_approximate(trimmed~) {
+    ⌐ ?d = parse_approximate(trimmed~) {
         ⤺ ?d;
     }
 

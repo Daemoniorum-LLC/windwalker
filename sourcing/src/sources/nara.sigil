@@ -270,7 +270,7 @@ rite parse_record_response(json: String~) -> Result<NaraResult, String> {
 }
 
 /// Parses a NARA result item
-rite parse_nara_result(item: &JsonValue) -> NaraResult? {
+rite parse_nara_result(item: &JsonValue) -> ?NaraResult {
     ≔ nara_id = item["naId"].as_str()?.to_string();
     ≔ title = item["title"].as_str()
         .unwrap_or("Untitled")
