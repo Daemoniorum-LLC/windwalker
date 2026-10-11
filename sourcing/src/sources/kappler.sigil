@@ -269,7 +269,7 @@ rite parse_treaty_page(html: String~, url: String!, page_num: i32!) -> Result<Ra
 // ============================================================================
 
 /// Extracts treaty title from HTML
-rite extract_treaty_title(html: String~) -> String? {
+rite extract_treaty_title(html: String~) -> ?String {
     // Try <h2> first
     ⎇ ≔ m = regex("<h2[^>]*>([^<]+)</h2>").find(html) {
         ⤺ ?html_decode(m.group(1).trim());
@@ -282,7 +282,7 @@ rite extract_treaty_title(html: String~) -> String? {
 }
 
 /// Extracts a date near a keyword (e.g., "signed", "ratified")
-rite extract_date_pattern(html: String~, keyword: &str!) -> String? {
+rite extract_date_pattern(html: String~, keyword: &str!) -> ?String {
     // Pattern: keyword followed by date within reasonable distance
     ≔ pattern = format!(
         "{}[^.]*?((?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{{1,2}},?\\s+\\d{{4}})",
@@ -336,7 +336,7 @@ rite extract_us_commissioners(html: String~) -> [String] {
 }
 
 /// Extracts preamble text
-rite extract_preamble(html: String~) -> String? {
+rite extract_preamble(html: String~) -> ?String {
     // Preamble is text between title and first article
     ≔ article_start = regex("(?:ARTICLE|ART\\.?)\\s*(?:I|1)\\b").find(html);
 
@@ -402,7 +402,7 @@ rite extract_signatures(html: String~) -> [String] {
 }
 
 /// Extracts Statutes at Large citation
-rite extract_stat_citation(html: String~) -> String? {
+rite extract_stat_citation(html: String~) -> ?String {
     // Pattern: "X Stat. Y" or "X Stat., Y"
     ⎇ ≔ m = regex("(\\d+)\\s*Stat\\.?,?\\s*(\\d+)").find(html) {
         ⤺ ?format!("{} Stat. {}", m.group(1), m.group(2));
@@ -415,7 +415,7 @@ rite extract_stat_citation(html: String~) -> String? {
 // ============================================================================
 
 /// Extracts date from treaty title
-rite extract_date_from_title(title: String~) -> String? {
+rite extract_date_from_title(title: String~) -> ?String {
     ≔ date_pattern = regex(
         "((?:January|February|March|April|May|June|July|August|September|October|November|December)\\s+\\d{1,2},?\\s+\\d{4})"
     );

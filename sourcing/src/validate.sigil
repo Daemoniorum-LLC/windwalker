@@ -217,7 +217,7 @@ rite titles_match(a: String~, b: String~) -> bool {
 // ============================================================================
 
 /// Determines if a treaty needs human review
-☉ rite needs_review(treaty: RawTreaty!, validation: ValidationResult!) -> ReviewItem? {
+☉ rite needs_review(treaty: RawTreaty!, validation: ValidationResult!) -> ?ReviewItem {
     // Validation failed
     ⎇ !validation.is_valid {
         ⤺ ?ReviewItem {
