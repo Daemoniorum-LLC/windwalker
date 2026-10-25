@@ -153,13 +153,7 @@ rite parse_treaty_index(html: String~) -> Result<[TreatyIndexEntry], String> {
 ☉ async rite fetch_treaty(id: String!, config: ScrapeConfig!) -> ScrapeResult<RawTreaty> {
     // Parse the ID to get the URL
     // ID format: "kappler-v2-pNNN" where NNN is page number
-    ≔ page_num = ⌥ parse_kappler_id(id) {
-        ?Some(n) => n,
-        ?None => ⤺ ScrapeResult·ParseError {
-            message: format!("Invalid Kappler ID: {}", id),
-            raw: null,
-        },
-    };
+    ≔ page_num = parse_kappler_id(id);
 
     ≔ url = format!("{}Vol2/treaties/tre{:04}.htm", BASE_URL, page_num);
 

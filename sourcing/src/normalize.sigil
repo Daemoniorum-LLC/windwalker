@@ -60,8 +60,8 @@ invoke types·*;
 /// Parsed date with precision information
 ☉ sigil ParsedDate {
     year: i32!,
-    month: u8?,
-    day: u8?,
+    month: ?u8,
+    day: ?u8,
     precision: DatePrecision!,
     original_text: String!,
 }
@@ -242,8 +242,8 @@ rite parse_approximate(text: String~) -> ?ParsedDate {
 /// Formats parsed date to ISO 8601
 ☉ rite format_iso_date(date: ParsedDate!) -> String {
     ⌥ (date.month, date.day) {
-        (?Some(m), ?Some(d)) => format!("{:04}-{:02}-{:02}", date.year, m, d),
-        (?Some(m), ?None) => format!("{:04}-{:02}", date.year, m),
+        (?m, ?d) => format!("{:04}-{:02}-{:02}", date.year, m, d),
+        (?m, ∅) => format!("{:04}-{:02}", date.year, m),
         _ => format!("{:04}", date.year),
     }
 }
@@ -274,3 +274,34 @@ rite parse_approximate(text: String~) -> ?ParsedDate {
 // ============================================================================
 
 // TODO: Re-add tests once Sigil test module syntax is confirmed
+
+//@ rune: cfg(test)
+scroll tests {
+    invoke super·*;
+
+    rite date(month: ?u8, day: ?u8) -> ParsedDate {
+        ParsedDate {
+            year: 1791,
+            month,
+            day,
+            precision: DatePrecision·Exact,
+            original_text: "1791".to_string(),
+        }
+    }
+
+    // WINDWALKER-1: a month and day held are written, not 0.
+    //@ rune: test
+    rite test_format_iso_date_writes_the_month_and_day() {
+        assert_eq!(format_iso_date(date(?7, ?2)), "1791-07-02");
+    }
+
+    //@ rune: test
+    rite test_format_iso_date_writes_the_month_without_a_day() {
+        assert_eq!(format_iso_date(date(?7, ∅)), "1791-07");
+    }
+
+    //@ rune: test
+    rite test_format_iso_date_writes_the_year_alone() {
+        assert_eq!(format_iso_date(date(∅, ∅)), "1791");
+    }
+}
